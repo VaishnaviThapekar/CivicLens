@@ -7,6 +7,7 @@ import {
   Upload, RefreshCw, Box, ArrowRight, Save, Trash2, ShieldAlert, Clock, Info
 } from "lucide-react";
 import { submitComplaint } from "@/lib/api";
+import ARDefectScanner from "@/components/ARDefectScanner";
 
 const CIVIC_CATEGORIES = [
   { name: "Potholes", icon: "🛣️" },
@@ -277,8 +278,16 @@ export default function MultimodalReportPage() {
           {/* Step 2: Multimodal Input Channels */}
           <div className="space-y-4 pt-4 border-t border-[#E7E9E4]">
             <label className="text-sm font-black text-[#102C2B] uppercase tracking-wider block">
-              2. Capture Evidence (Photo / Video / Voice / Text)
+              2. Capture Evidence (Real-Time AR Scanner / Photo / Voice / Text)
             </label>
+
+            {/* Real-Time AR Depth Scanner HUD */}
+            <div className="space-y-2">
+              <span className="text-xs font-bold text-[#287C73] flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-[#287C73]" /> Real-Time 3D AR Defect HUD Scanner
+              </span>
+              <ARDefectScanner />
+            </div>
 
             <div className="grid grid-cols-4 gap-2">
               <button

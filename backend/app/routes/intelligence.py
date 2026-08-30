@@ -177,4 +177,10 @@ def get_disaster_emergency_telemetry():
     from app.services.disaster_coordinator import get_disaster_response_telemetry
     return get_disaster_response_telemetry()
 
+@router.post("/agentic-dispatch")
+def execute_agentic_ai_dispatch(report_text: str = Body("Pothole near college gate", embed=True), area_sqm: float = Body(14.5, embed=True)):
+    from app.services.agentic_llm import run_agentic_dispatch_reasoning
+    return run_agentic_dispatch_reasoning(report_text=report_text, area_sqm=area_sqm)
+
+
 

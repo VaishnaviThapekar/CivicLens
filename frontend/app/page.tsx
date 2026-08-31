@@ -5,9 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Lock, Mail, User, ShieldCheck, ArrowRight, Sparkles, CheckCircle2, RefreshCw, KeyRound, Globe, Compass,
-  Camera, MapPin, Eye, Activity, ShieldAlert, Award, LogOut, Building2, Layers, TrendingUp
+  Camera, MapPin, Eye, Activity, ShieldAlert, Award, LogOut, Building2, Layers, TrendingUp, Zap, Cpu, Award as AwardIcon, CheckCircle
 } from "lucide-react";
 import MapVisualizer from "@/components/MapVisualizer";
+import ARDefectScanner from "@/components/ARDefectScanner";
 import { loginUser, registerUser } from "@/lib/api";
 
 export default function RootLandingAuthPage() {
@@ -54,7 +55,7 @@ export default function RootLandingAuthPage() {
 
       setTimeout(() => {
         setIsAuthenticated(true);
-      }, 700);
+      }, 600);
     } catch (err: any) {
       setErrorMsg("Invalid credentials. Please check your email and password.");
     } finally {
@@ -80,7 +81,7 @@ export default function RootLandingAuthPage() {
         setMode("login");
         setLoginEmail(signupEmail);
         setLoginPassword(signupPassword);
-      }, 900);
+      }, 800);
     } catch (err: any) {
       setErrorMsg("Registration failed. Email may already be registered.");
     } finally {
@@ -96,64 +97,54 @@ export default function RootLandingAuthPage() {
     setUserProfile(null);
   };
 
-  // 1. UNIQUE ENHANCED LANDING GATEWAY WITH CITY VIEWS & SIGN IN GATE
+  // LANDING HERO & AUTH GATEWAY FOR UNAUTHENTICATED USERS
   if (!isAuthenticated) {
     return (
-      <div className="space-y-12 pb-16 animate-fade-in">
-        {/* City View Hero Header */}
-        <section className="relative overflow-hidden bg-white text-[#102C2B] border border-[#E7E9E4] rounded-3xl p-8 sm:p-12 shadow-md">
-          {/* Animated City Grid Vector Graphic Background */}
-          <div className="absolute inset-0 opacity-10 pointer-events-none">
-            <svg className="w-full h-full" viewBox="0 0 1000 500" preserveAspectRatio="none">
-              <path d="M 0,400 L 200,300 L 400,380 L 600,260 L 800,340 L 1000,220 V 500 H 0 Z" fill="#287C73" />
-              <circle cx="200" cy="300" r="12" fill="#287C73" className="animate-ping" />
-              <circle cx="600" cy="260" r="10" fill="#F3B83F" className="animate-bounce" />
-              <circle cx="800" cy="340" r="14" fill="#D94F4F" className="animate-ping" />
-            </svg>
-          </div>
-
-          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-            {/* Left: City Telemetry & Value Proposition */}
-            <div className="lg:col-span-6 space-y-6">
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#287C73]/10 text-[#287C73] border border-[#287C73]/20 text-xs font-extrabold">
-                <Building2 className="w-4 h-4 text-[#287C73]" /> Central District Urban Grid Portal
+      <div className="space-y-16 pb-20 animate-fade-in text-[#102C2B]">
+        {/* Executive Hero Section */}
+        <section className="relative overflow-hidden bg-white border border-[#E7E9E4] rounded-3xl p-8 sm:p-12 shadow-xl">
+          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
+            {/* Left Column: Platform Value & Live Telemetry */}
+            <div className="lg:col-span-7 space-y-6">
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#287C73]/10 text-[#287C73] border border-[#287C73]/20 text-xs font-black uppercase tracking-wider">
+                <Sparkles className="w-4 h-4 text-[#287C73]" /> Next-Gen AI Civic Intelligence &amp; Autonomous Governance
               </div>
 
-              <h1 className="text-3xl sm:text-5xl font-black tracking-tight leading-tight text-[#102C2B]">
+              <h1 className="text-4xl sm:text-6xl font-black tracking-tight leading-tight text-[#102C2B]">
                 See Your City. <br />
                 <span className="text-[#287C73]">Make It Better.</span>
               </h1>
 
-              <p className="text-xs sm:text-sm text-[#4B6363] font-medium leading-relaxed max-w-lg">
-                AI-powered civic intelligence turning citizen report photos, multilingual voice notes, and IoT sensor feeds into verified, SLA-enforced municipal action.
+              <p className="text-sm sm:text-base text-[#4B6363] font-medium leading-relaxed max-w-xl">
+                CivicLens combines 3D AR camera defect scanning, multimodal voice transcription (Marathi, Hindi, English), spatial DBSCAN clustering, and autonomous Agentic AI dispatching to transform urban reports into verified civic action.
               </p>
 
-              {/* City Metric Tickers */}
-              <div className="grid grid-cols-3 gap-3 pt-2">
-                <div className="bg-[#F7F6F2] border border-[#E7E9E4] p-3 rounded-2xl">
-                  <span className="text-[10px] uppercase font-bold text-[#4B6363] block">ACTIVE INCIDENTS</span>
-                  <strong className="text-lg font-black text-[#102C2B]">184 Live</strong>
+              {/* Key Platform KPI Badges */}
+              <div className="grid grid-cols-3 gap-4 pt-2">
+                <div className="bg-[#F7F6F2] border border-[#E7E9E4] p-4 rounded-2xl">
+                  <span className="text-[10px] uppercase font-black text-[#4B6363] block">RESOLVED INCIDENTS</span>
+                  <strong className="text-xl sm:text-2xl font-black text-[#287C73]">12,482</strong>
                 </div>
 
-                <div className="bg-[#F7F6F2] border border-[#E7E9E4] p-3 rounded-2xl">
-                  <span className="text-[10px] uppercase font-bold text-[#4B6363] block">CRITICAL P1</span>
-                  <strong className="text-lg font-black text-[#D94F4F]">42 Priority</strong>
+                <div className="bg-[#F7F6F2] border border-[#E7E9E4] p-4 rounded-2xl">
+                  <span className="text-[10px] uppercase font-black text-[#4B6363] block">AI VISION ACCURACY</span>
+                  <strong className="text-xl sm:text-2xl font-black text-[#10B981]">98.4%</strong>
                 </div>
 
-                <div className="bg-[#F7F6F2] border border-[#E7E9E4] p-3 rounded-2xl">
-                  <span className="text-[10px] uppercase font-bold text-[#4B6363] block">AI VERIFIED</span>
-                  <strong className="text-lg font-black text-[#10B981]">73% Pass Rate</strong>
+                <div className="bg-[#F7F6F2] border border-[#E7E9E4] p-4 rounded-2xl">
+                  <span className="text-[10px] uppercase font-black text-[#4B6363] block">AVERAGE SLA</span>
+                  <strong className="text-xl sm:text-2xl font-black text-[#102C2B]">2.4 Hours</strong>
                 </div>
               </div>
             </div>
 
-            {/* Right: Sign In Gate Card */}
-            <div className="lg:col-span-6 bg-white text-[#102C2B] border border-[#E7E9E4] rounded-3xl p-7 shadow-2xl space-y-5">
+            {/* Right Column: High-End Sign In Gate Card */}
+            <div className="lg:col-span-5 bg-white border border-[#E7E9E4] rounded-3xl p-8 shadow-2xl space-y-5 relative">
               <div className="text-center space-y-1">
                 <span className="text-[10px] font-black text-[#287C73] uppercase tracking-wider bg-[#287C73]/10 px-3 py-0.5 rounded-full border border-[#287C73]/20">
                   🔐 AUTHENTICATION GATEWAY
                 </span>
-                <h2 className="text-2xl font-black text-[#102C2B]">Sign In to Enter City Platform</h2>
+                <h2 className="text-2xl font-black text-[#102C2B]">Sign In to City Dashboard</h2>
               </div>
 
               {/* Mode Switcher Tabs */}
@@ -230,7 +221,7 @@ export default function RootLandingAuthPage() {
                     disabled={loading}
                     className="w-full py-3.5 rounded-xl bg-[#287C73] hover:bg-[#1F645D] text-white font-black text-xs shadow-md flex items-center justify-center gap-2 transition-all hover:scale-[1.01] teal-glow"
                   >
-                    {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <>Sign In &amp; Unlock City Dashboard &rarr;</>}
+                    {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <>Sign In &amp; Unlock City Platform &rarr;</>}
                   </button>
                 </form>
               ) : (
@@ -292,14 +283,59 @@ export default function RootLandingAuthPage() {
             </div>
           </div>
         </section>
+
+        {/* Feature Highlights Grid */}
+        <section className="space-y-6">
+          <div className="text-center space-y-2 max-w-2xl mx-auto">
+            <span className="text-xs font-black text-[#287C73] uppercase tracking-wider bg-[#287C73]/10 px-3.5 py-1 rounded-full border border-[#287C73]/20">
+              ⚡ PLATFORM CAPABILITIES
+            </span>
+            <h2 className="text-3xl font-black text-[#102C2B]">Engineered for Next-Gen Cities</h2>
+            <p className="text-xs text-[#4B6363] font-medium">
+              Closing the loop between citizen grievances, municipal field crews, third-party contractors, and municipal leadership.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white border border-[#E7E9E4] p-6 rounded-3xl space-y-3 hover-lift shadow-sm">
+              <div className="w-10 h-10 rounded-2xl bg-[#287C73]/10 text-[#287C73] flex items-center justify-center font-bold text-xl">
+                📷
+              </div>
+              <h3 className="font-extrabold text-base text-[#102C2B]">Real-Time 3D AR Camera HUD</h3>
+              <p className="text-xs text-[#4B6363] font-medium leading-relaxed">
+                Augmented reality camera view estimating defect depth, calculating surface area in m², and capturing GPS coordinates automatically.
+              </p>
+            </div>
+
+            <div className="bg-white border border-[#E7E9E4] p-6 rounded-3xl space-y-3 hover-lift shadow-sm">
+              <div className="w-10 h-10 rounded-2xl bg-[#287C73]/10 text-[#287C73] flex items-center justify-center font-bold text-xl">
+                🤖
+              </div>
+              <h3 className="font-extrabold text-base text-[#102C2B]">Autonomous Agentic LLM Dispatch</h3>
+              <p className="text-xs text-[#4B6363] font-medium leading-relaxed">
+                Agentic reasoning loop auto-querying GIS ward databases, estimating required repair materials, and issuing PWD work orders autonomously.
+              </p>
+            </div>
+
+            <div className="bg-white border border-[#E7E9E4] p-6 rounded-3xl space-y-3 hover-lift shadow-sm">
+              <div className="w-10 h-10 rounded-2xl bg-[#287C73]/10 text-[#287C73] flex items-center justify-center font-bold text-xl">
+                🛡️
+              </div>
+              <h3 className="font-extrabold text-base text-[#102C2B]">Visual Evidence Anti-Fraud Audit</h3>
+              <p className="text-xs text-[#4B6363] font-medium leading-relaxed">
+                SSIM structural similarity and dHash perceptual fingerprinting comparing BEFORE vs AFTER photos to reject fake or recycled resolution uploads.
+              </p>
+            </div>
+          </div>
+        </section>
       </div>
     );
   }
 
-  // 2. UNLOCKED MAIN CITY DASHBOARD (DISPLAYED AFTER SIGNIN / ENTRY)
+  // UNLOCKED MAIN CITY DASHBOARD FOR AUTHENTICATED USERS
   return (
-    <div className="space-y-16 pb-16 animate-fade-in">
-      {/* Authenticated User Status Bar */}
+    <div className="space-y-16 pb-16 animate-fade-in text-[#102C2B]">
+      {/* Authenticated User Banner */}
       <section className="bg-white border border-[#E7E9E4] rounded-3xl p-8 shadow-sm space-y-6">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           <div className="space-y-2">

@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { BarChart3, Zap, ShieldAlert, TrendingUp, AlertTriangle, Activity, Wifi, Radio, Plane, Truck, Wrench, Layers } from "lucide-react";
 import { fetchPredictiveRisks } from "@/lib/api";
+import CPGRAMSSyncBadge from "@/components/CPGRAMSSyncBadge";
+import IoTSensorWidget from "@/components/IoTSensorWidget";
 
 export default function PredictiveAnalyticsPage() {
   const [risks, setRisks] = useState<any[]>([]);
@@ -38,6 +40,12 @@ export default function PredictiveAnalyticsPage() {
             Sub-surface thermal leak infrared scans, CV material quantity calculation, and field repair squad route optimization.
           </p>
         </div>
+      </div>
+
+      {/* Real-Time IoT & National CPGRAMS Webhook Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <CPGRAMSSyncBadge />
+        <IoTSensorWidget />
       </div>
 
       {/* AI Material Quantifier & Automated Dispatch Engine */}

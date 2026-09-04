@@ -40,6 +40,15 @@ export default function PredictiveAnalyticsPage() {
             Sub-surface thermal leak infrared scans, CV material quantity calculation, and field repair squad route optimization.
           </p>
         </div>
+
+        <a
+          href="http://localhost:8000/api/intelligence/export-audit-pdf"
+          target="_blank"
+          rel="noreferrer"
+          className="px-5 py-3 rounded-2xl bg-[#287C73] hover:bg-[#1F645D] text-white font-extrabold text-xs shadow-md flex items-center gap-2 transition-all shrink-0 hover:scale-[1.02] teal-glow"
+        >
+          📄 Download Official Ward Audit (PDF) &rarr;
+        </a>
       </div>
 
       {/* Real-Time IoT & National CPGRAMS Webhook Grid */}

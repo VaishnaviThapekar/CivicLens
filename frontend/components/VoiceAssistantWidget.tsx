@@ -6,9 +6,26 @@ import { Mic, MicOff, Volume2, Sparkles, X, CheckCircle2 } from "lucide-react";
 export default function VoiceAssistantWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const [listening, setListening] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [response, setResponse] = useState<string | null>(null);
   const [language, setLanguage] = useState<"English" | "Marathi" | "Hindi">("English");
+
+  const speakAudioReply = (textToSpeak: string) => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(textToSpeak);
+      if (language === "Marathi") utterance.lang = "mr-IN";
+      else if (language === "Hindi") utterance.lang = "hi-IN";
+      else utterance.lang = "en-IN";
+
+      utterance.onstart = () => setSpeaking(true);
+      utterance.onend = () => setSpeaking(false);
+      utterance.onerror = () => setSpeaking(false);
+
+      window.speechSynthesis.speak(utterance);
+    }
+  };
 
   const handleStartListening = () => {
     setListening(true);
@@ -17,17 +34,20 @@ export default function VoiceAssistantWidget() {
 
     // Simulate voice speech-to-text recognition
     setTimeout(() => {
+      let respText = "";
       if (language === "Marathi") {
         setTranscript("कॉलेज रोडवर मोठा खड्डा पडला आहे, अपघात होण्याची शक्यता आहे.");
-        setResponse("मराठी संदेश मिळाला! प्रकरणाचे वर्गीकरण: रस्ता पायाभूत सुविधा (PWD). तक्रार नोंदवली गेली आहे.");
+        respText = "मराठी संदेश मिळाला! प्रकरणाचे वर्गीकरण: रस्ता पायाभूत सुविधा (PWD). तक्रार नोंदवली गेली आहे.";
       } else if (language === "Hindi") {
         setTranscript("यहाँ कॉलेज रोड के पास सड़क पर बड़ा गड्ढा है।");
-        setResponse("हिंदी संदेश प्राप्त हुआ! AI श्रेणी: सड़क मरम्मत cell. प्राथमिकता: P1 Critical.");
+        respText = "हिंदी संदेश प्राप्त हुआ! AI श्रेणी: सड़क मरम्मत cell. प्राथमिकता: P1 Critical.";
       } else {
         setTranscript("Large crater pothole hazard near college gate corridor.");
-        setResponse("Voice report transcribed! AI Vision confidence: 94%. Department dispatched: PWD Division.");
+        respText = "Voice report transcribed! AI Vision confidence: 94%. Department dispatched: PWD Division.";
       }
+      setResponse(respText);
       setListening(false);
+      speakAudioReply(respText);
     }, 1800);
   };
 
@@ -105,12 +125,21 @@ export default function VoiceAssistantWidget() {
             </div>
           )}
 
-          {/* Response Output */}
+          {/* Response Output & Spoken Audio Indicator */}
           {response && (
             <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800 space-y-1">
-              <div className="flex items-center gap-1.5 text-[#10B981]">
-                <Volume2 className="w-3.5 h-3.5" />
-                <span>AI Voice Reply:</span>
+              <div className="flex items-center justify-between text-[#10B981]">
+                <div className="flex items-center gap-1.5">
+                  <Volume2 className={`w-4 h-4 ${speaking ? "animate-bounce text-emerald-600" : ""}`} />
+                  <span>AI Voice Reply:</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => speakAudioReply(response)}
+                  className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full hover:bg-emerald-700"
+                >
+                  🔊 Replay Audio
+                </button>
               </div>
               <p className="text-[11px]">{response}</p>
             </div>

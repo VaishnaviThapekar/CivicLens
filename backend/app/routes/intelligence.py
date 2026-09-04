@@ -182,5 +182,13 @@ def execute_agentic_ai_dispatch(report_text: str = Body("Pothole near college ga
     from app.services.agentic_llm import run_agentic_dispatch_reasoning
     return run_agentic_dispatch_reasoning(report_text=report_text, area_sqm=area_sqm)
 
+@router.get("/export-audit-pdf")
+def download_ward_audit_pdf_report(ward_name: str = "Ward 63 (College Road)"):
+    from fastapi.responses import HTMLResponse
+    from app.services.pdf_export import generate_ward_audit_report_html
+    html_content = generate_ward_audit_report_html(ward_name=ward_name)
+    return HTMLResponse(content=html_content, status_code=200)
+
+
 
 

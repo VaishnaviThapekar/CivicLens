@@ -56,12 +56,23 @@ export default function SupervisorPortal() {
           </p>
         </div>
 
-        <button
-          onClick={loadSupervisorData}
-          className="px-4 py-2 rounded-xl bg-[#1F293D] hover:bg-[#2D3B54] text-white text-xs font-semibold flex items-center gap-2 border border-[#2D3B54]"
-        >
-          <RefreshCw className="w-4 h-4 text-[#287C73]" /> Refresh Audit Data
-        </button>
+        <div className="flex items-center gap-3">
+          <a
+            href="http://localhost:8000/api/intelligence/export-audit-pdf"
+            target="_blank"
+            rel="noreferrer"
+            className="px-4 py-2 rounded-xl bg-[#287C73] hover:bg-[#1F645D] text-white text-xs font-bold flex items-center gap-2 border border-[#287C73]"
+          >
+            📄 Download Audit (PDF) &rarr;
+          </a>
+
+          <button
+            onClick={loadSupervisorData}
+            className="px-4 py-2 rounded-xl bg-[#1F293D] hover:bg-[#2D3B54] text-white text-xs font-semibold flex items-center gap-2 border border-[#2D3B54]"
+          >
+            <RefreshCw className="w-4 h-4 text-[#287C73]" /> Refresh Audit Data
+          </button>
+        </div>
       </div>
 
       {/* Contractor Penalty Tracker & Quality Scorecard */}

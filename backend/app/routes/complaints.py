@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query, Body
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Set
 from datetime import datetime
 import uuid
 from pydantic import BaseModel
@@ -18,6 +18,31 @@ router = APIRouter(prefix="/api/complaints", tags=["Complaints"])
 
 COMMENTS_STORE: Dict[str, List[Dict[str, Any]]] = {}
 ATTACHMENTS_STORE: Dict[str, List[Dict[str, Any]]] = {}
+
+# Authoritative Lifecycle State Machine Transition Rules
+VALID_TRANSITIONS: Dict[ComplaintStatus, Set[ComplaintStatus]] = {
+    ComplaintStatus.SUBMITTED: {ComplaintStatus.AI_ANALYSIS, ComplaintStatus.VERIFIED, ComplaintStatus.ASSIGNED, ComplaintStatus.REJECTED},
+    ComplaintStatus.AI_ANALYSIS: {ComplaintStatus.VERIFIED, ComplaintStatus.ASSIGNED, ComplaintStatus.REJECTED},
+    ComplaintStatus.VERIFIED: {ComplaintStatus.ASSIGNED, ComplaintStatus.REJECTED},
+    ComplaintStatus.ASSIGNED: {ComplaintStatus.IN_PROGRESS, ComplaintStatus.REJECTED},
+    ComplaintStatus.IN_PROGRESS: {ComplaintStatus.AI_VERIFICATION, ComplaintStatus.CITIZEN_CONFIRMATION, ComplaintStatus.RESOLVED, ComplaintStatus.REJECTED},
+    ComplaintStatus.AI_VERIFICATION: {ComplaintStatus.CITIZEN_CONFIRMATION, ComplaintStatus.RESOLVED, ComplaintStatus.REJECTED},
+    ComplaintStatus.CITIZEN_CONFIRMATION: {ComplaintStatus.CLOSED, ComplaintStatus.REOPENED},
+    ComplaintStatus.RESOLVED: {ComplaintStatus.CLOSED, ComplaintStatus.REOPENED},
+    ComplaintStatus.CLOSED: {ComplaintStatus.REOPENED},
+    ComplaintStatus.REOPENED: {ComplaintStatus.ASSIGNED, ComplaintStatus.IN_PROGRESS, ComplaintStatus.REJECTED},
+    ComplaintStatus.REJECTED: {ComplaintStatus.REOPENED}
+}
+
+def validate_status_transition(current_status: ComplaintStatus, new_status: ComplaintStatus):
+    if current_status == new_status:
+        return
+    allowed = VALID_TRANSITIONS.get(current_status, set())
+    if new_status not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid lifecycle transition from '{current_status.value}' to '{new_status.value}'. Allowed transitions: {[s.value for s in allowed]}"
+        )
 
 class StatusUpdateRequest(BaseModel):
   status: str
@@ -61,9 +86,12 @@ def create_complaint(payload: ComplaintCreate):
         payload.voice_transcript or ""
     )
 
+    # Bug 10 Fix: Only pass image_url / image photo base64 to computer vision analysis (never audio base64)
+    image_input = payload.image_url if payload.image_url else None
+
     cv_result = analyze_complaint_image(
-        payload.image_url or payload.audio_base64,
-        payload.description
+        image_input,
+        payload.description if image_input else ""
     )
 
     new_complaint = Complaint(
@@ -90,10 +118,10 @@ def create_complaint(payload: ComplaintCreate):
     all_complaints = list(db_store.complaints.values()) + [new_complaint]
     clusters = cluster_complaints(all_complaints)
 
+    # Bug 9 Fix: Spatial clustering sets cluster_id without overriding status to IN_PROGRESS prematurely
     for cl in clusters:
         if new_complaint.id in cl.report_ids:
             new_complaint.cluster_id = cl.cluster_id
-            new_complaint.status = ComplaintStatus.IN_PROGRESS
             break
 
     db_store.add_complaint(new_complaint)
@@ -145,14 +173,26 @@ def update_complaint_status(complaint_id: str, req: StatusUpdateRequest):
         "ai_verification": ComplaintStatus.AI_VERIFICATION,
         "citizen_confirmation": ComplaintStatus.CITIZEN_CONFIRMATION,
         "closed": ComplaintStatus.CLOSED,
-        "reopened": ComplaintStatus.REOPENED
+        "reopened": ComplaintStatus.REOPENED,
+        "rejected": ComplaintStatus.REJECTED
     }
 
-    new_st = status_map.get(req.status.lower())
-    if new_st:
-        complaint.status = new_st
-        complaint.updated_at = datetime.now().isoformat()
-        db_store.update_complaint(complaint)
+    st_key = req.status.lower()
+    if st_key not in status_map:
+        # Bug 7 Fix: Reject invalid status instead of returning dummy success
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid complaint status '{req.status}'. Valid statuses: {list(status_map.keys())}"
+        )
+
+    new_st = status_map[st_key]
+    
+    # Bug 8 Fix: Validate workflow transition
+    validate_status_transition(complaint.status, new_st)
+
+    complaint.status = new_st
+    complaint.updated_at = datetime.now().isoformat()
+    db_store.update_complaint(complaint)
 
     return {"status": "success", "new_status": complaint.status.value, "notes": req.notes}
 
@@ -161,6 +201,8 @@ def reopen_complaint(complaint_id: str, reason: str = Body(..., embed=True)):
     complaint = db_store.get_complaint_by_id(complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
+
+    validate_status_transition(complaint.status, ComplaintStatus.REOPENED)
 
     complaint.status = ComplaintStatus.REOPENED
     complaint.updated_at = datetime.now().isoformat()
@@ -183,6 +225,8 @@ def assign_reassign_complaint(complaint_id: str, req: ReassignRequest):
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
 
+    validate_status_transition(complaint.status, ComplaintStatus.ASSIGNED)
+
     if req.department: complaint.department = req.department
     if req.officer_assigned: complaint.officer_assigned = req.officer_assigned
     if req.ward: complaint.location.ward = req.ward
@@ -200,6 +244,11 @@ def assign_reassign_complaint(complaint_id: str, req: ReassignRequest):
 
 @router.post("/{complaint_id}/comments")
 def add_comment(complaint_id: str, req: CommentRequest):
+    # Bug 11 Fix: Verify complaint exists before attaching comments
+    complaint = db_store.get_complaint_by_id(complaint_id)
+    if not complaint:
+        raise HTTPException(status_code=404, detail=f"Complaint with ID '{complaint_id}' not found")
+
     if complaint_id not in COMMENTS_STORE:
         COMMENTS_STORE[complaint_id] = []
 
@@ -215,10 +264,17 @@ def add_comment(complaint_id: str, req: CommentRequest):
 
 @router.get("/{complaint_id}/comments")
 def get_comments(complaint_id: str):
+    complaint = db_store.get_complaint_by_id(complaint_id)
+    if not complaint:
+        raise HTTPException(status_code=404, detail=f"Complaint with ID '{complaint_id}' not found")
     return {"comments": COMMENTS_STORE.get(complaint_id, [])}
 
 @router.post("/{complaint_id}/attachments")
 def add_attachment(complaint_id: str, req: AttachmentRequest):
+    complaint = db_store.get_complaint_by_id(complaint_id)
+    if not complaint:
+        raise HTTPException(status_code=404, detail=f"Complaint with ID '{complaint_id}' not found")
+
     if complaint_id not in ATTACHMENTS_STORE:
         ATTACHMENTS_STORE[complaint_id] = []
 
@@ -234,6 +290,9 @@ def add_attachment(complaint_id: str, req: AttachmentRequest):
 
 @router.get("/{complaint_id}/attachments")
 def get_attachments(complaint_id: str):
+    complaint = db_store.get_complaint_by_id(complaint_id)
+    if not complaint:
+        raise HTTPException(status_code=404, detail=f"Complaint with ID '{complaint_id}' not found")
     return {"attachments": ATTACHMENTS_STORE.get(complaint_id, [])}
 
 @router.post("/{complaint_id}/citizen-confirm")
@@ -244,8 +303,10 @@ def confirm_resolution(complaint_id: str, action: str = Query(..., pattern="^(CO
 
     complaint.verification_result.citizen_confirmation = action
     if action == "CONFIRMED":
+        validate_status_transition(complaint.status, ComplaintStatus.CLOSED)
         complaint.status = ComplaintStatus.CLOSED
     else:
+        validate_status_transition(complaint.status, ComplaintStatus.REOPENED)
         complaint.status = ComplaintStatus.REOPENED
 
     db_store.update_complaint(complaint)

@@ -36,6 +36,7 @@ class ComplaintStatus(str, Enum):
     CITIZEN_CONFIRMATION = "Citizen Confirmed"
     CLOSED = "Closed"
     REOPENED = "Reopened (Not Fixed)"
+    REJECTED = "Rejected"
     REJECTED_FAKE_RESOLUTION = "Fake Resolution Flagged"
 
 class SmartTicket(BaseModel):

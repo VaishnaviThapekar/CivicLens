@@ -15,7 +15,10 @@ SUBCATEGORY_TREE = {
   "Traffic & Road Safety": ["Traffic signal failure", "Illegal parking", "Obstruction on road", "Accident bottleneck"]
 }
 
-def analyze_image(image_input: Optional[str], user_description: str = "") -> AIDetectionDetails:
+def analyze_image(image_input: Optional[str], user_description: str = "") -> Optional[AIDetectionDetails]:
+  if not image_input and not user_description:
+    return None
+
   desc_lower = (user_description + " " + str(image_input or "")).lower()
 
   if any(w in desc_lower for w in ["pothole", "crater", "road", "crack", "asphalt"]):

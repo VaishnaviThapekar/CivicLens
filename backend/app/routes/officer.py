@@ -5,6 +5,7 @@ from datetime import datetime
 
 from app.db.store import db_store
 from app.models.schemas import Complaint, ComplaintStatus, PriorityLevel
+from app.routes.complaints import validate_status_transition
 
 router = APIRouter(prefix="/api/officer", tags=["Officer Operations"])
 
@@ -42,6 +43,9 @@ def update_complaint_status(payload: StatusUpdatePayload):
     complaint = db_store.get_complaint_by_id(payload.complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
+    
+    # Bug 8 Fix: Enforce lifecycle state transition rules in officer portal
+    validate_status_transition(complaint.status, payload.status)
     
     complaint.status = payload.status
     if payload.officer_name:

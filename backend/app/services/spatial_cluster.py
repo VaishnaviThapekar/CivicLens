@@ -1,10 +1,12 @@
 """
 CivicLens Spatial Incident Clustering & Multi-Hazard Root Cause Detection Engine
 Clusters raw citizen complaints into unique root-cause civic incidents using order-independent connected-component DBSCAN expansion.
+Calculates dynamic cluster priority and dynamic creation timestamps.
 """
 
 from typing import List, Dict, Any, Set
 from collections import deque
+from datetime import datetime
 from app.models.schemas import CivicIncidentCluster, ComplaintCategory, PriorityLevel
 from app.services.duplicate_detector import calculate_haversine_distance_meters
 
@@ -26,6 +28,31 @@ def get_complaint_lat_lng_cat(c: Any):
                 break
     return lat, lng, cat, ward
 
+def derive_cluster_priority(cluster_members: List[Any]) -> PriorityLevel:
+    """Bug 21 Fix: Dynamically infer cluster priority from member complaints (P1 > P2 > P3 > P4)."""
+    priorities = []
+    for m in cluster_members:
+        p = getattr(m, "priority", None) if hasattr(m, "priority") else (m.get("priority") if isinstance(m, dict) else None)
+        p_str = p.value if hasattr(p, "value") else str(p or "")
+        priorities.append(p_str)
+
+    if any("P1" in p or "Critical" in p for p in priorities):
+        return PriorityLevel.P1
+    elif any("P2" in p or "High" in p for p in priorities):
+        return PriorityLevel.P2
+    elif any("P3" in p or "Medium" in p for p in priorities):
+        return PriorityLevel.P3
+    return PriorityLevel.P4
+
+def derive_cluster_created_at(cluster_members: List[Any]) -> str:
+    """Bug 22 Fix: Set cluster created_at to earliest report creation timestamp in the cluster."""
+    timestamps = []
+    for m in cluster_members:
+        ts = getattr(m, "created_at", None) if hasattr(m, "created_at") else (m.get("created_at") if isinstance(m, dict) else None)
+        if ts:
+            timestamps.append(str(ts))
+    return min(timestamps) if timestamps else datetime.now().isoformat()
+
 def cluster_complaints_spatially(complaints: List[Any], max_radius_meters: float = 500.0) -> Dict[str, Any]:
     raw_count = len(complaints)
     if raw_count == 0:
@@ -38,7 +65,7 @@ def cluster_complaints_spatially(complaints: List[Any], max_radius_meters: float
 
     parsed_data = [get_complaint_lat_lng_cat(c) for c in complaints]
 
-    # Bug 19 Fix: Order-independent graph connected-component expansion (DBSCAN)
+    # Order-independent graph connected-component expansion (DBSCAN)
     adj: Dict[int, List[int]] = {i: [] for i in range(raw_count)}
     for i in range(raw_count):
         lat1, lng1, cat1, _ = parsed_data[i]
@@ -80,6 +107,10 @@ def cluster_complaints_spatially(complaints: List[Any], max_radius_meters: float
             cluster_id = f"CL-INCIDENT-{1020 + len(clusters_map)}"
             cat_name = cat1.value if hasattr(cat1, 'value') else str(cat1)
 
+            # Bug 21 & Bug 22 Fixes: Dynamic Priority & Earliest Creation Date
+            dynamic_priority = derive_cluster_priority(cluster_members)
+            dynamic_created_at = derive_cluster_created_at(cluster_members)
+
             clusters_map.append(
                 CivicIncidentCluster(
                     cluster_id=cluster_id,
@@ -92,14 +123,14 @@ def cluster_complaints_spatially(complaints: List[Any], max_radius_meters: float
                     supporting_reports_count=len(component),
                     report_ids=rep_ids,
                     status="Active Incident",
-                    priority=PriorityLevel.P1,
-                    created_at="2026-08-24T10:00:00Z"
+                    priority=dynamic_priority,
+                    created_at=dynamic_created_at
                 )
             )
         else:
             unclustered_count += 1
 
-    # Bug 20 Fix: Unique incidents count includes clusters + unclustered single reports
+    # Unique incidents count includes clusters + unclustered single reports
     unique_incidents_count = len(clusters_map) + unclustered_count
     reduction = ((raw_count - unique_incidents_count) / raw_count * 100) if raw_count > 0 else 0.0
 

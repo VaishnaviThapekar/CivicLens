@@ -23,17 +23,16 @@ def get_officer_queue():
     """
     complaints = db_store.get_all_complaints()
     
-    # Priority sorting weights
-    p_weight = {
-        PriorityLevel.P1: 1,
-        PriorityLevel.P2: 2,
-        PriorityLevel.P3: 3,
-        PriorityLevel.P4: 4
-    }
+    def get_p_weight(p):
+        p_str = p.value if hasattr(p, "value") else str(p)
+        if "P1" in p_str or "Critical" in p_str: return 1
+        if "P2" in p_str or "High" in p_str: return 2
+        if "P3" in p_str or "Medium" in p_str: return 3
+        return 4
     
     sorted_queue = sorted(
         complaints,
-        key=lambda c: (p_weight.get(c.priority, 5), c.created_at),
+        key=lambda c: (get_p_weight(c.priority), c.created_at),
         reverse=False
     )
     return sorted_queue

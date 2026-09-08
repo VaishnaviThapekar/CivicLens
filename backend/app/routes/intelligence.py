@@ -13,12 +13,23 @@ router = APIRouter(prefix="/api/intelligence", tags=["Civic Intelligence"])
 
 CUSTOM_SLA_MATRIX = dict(DEFAULT_SLA_CONFIG)
 
+def is_critical_complaint(c) -> bool:
+    p_val = c.priority.value if hasattr(c.priority, "value") else str(c.priority)
+    return ("P1" in p_val or "Critical" in p_val) and c.status != ComplaintStatus.CLOSED
+
+def is_overdue_complaint(c) -> bool:
+    if c.status in [ComplaintStatus.RESOLVED, ComplaintStatus.CLOSED, ComplaintStatus.CITIZEN_CONFIRMATION, ComplaintStatus.AI_VERIFICATION]:
+        return False
+    p_val = c.priority.value if hasattr(c.priority, "value") else str(c.priority)
+    sla_res = calculate_sla_deadline(c.created_at, p_val, CUSTOM_SLA_MATRIX)
+    return sla_res.get("is_breached", False)
+
 @router.get("/stats", response_model=StatsOverview)
 def get_stats_overview():
     complaints = db_store.get_all_complaints()
-    critical = sum(1 for c in complaints if c.priority == "P1 — Critical" and c.status != ComplaintStatus.CLOSED)
+    critical = sum(1 for c in complaints if is_critical_complaint(c))
     pending = sum(1 for c in complaints if c.status in [ComplaintStatus.SUBMITTED, ComplaintStatus.IN_PROGRESS, ComplaintStatus.ASSIGNED])
-    overdue = sum(1 for c in complaints if c.priority in ["P1 — Critical", "P2 — High"] and c.status not in [ComplaintStatus.RESOLVED, ComplaintStatus.CLOSED, ComplaintStatus.CITIZEN_CONFIRMATION])
+    overdue = sum(1 for c in complaints if is_overdue_complaint(c))
     verified_resolved = sum(1 for c in complaints if c.status in [ComplaintStatus.RESOLVED, ComplaintStatus.CITIZEN_CONFIRMATION, ComplaintStatus.CLOSED, ComplaintStatus.AI_VERIFICATION])
     fake_flagged = sum(1 for c in complaints if c.status == ComplaintStatus.REJECTED_FAKE_RESOLUTION)
 
@@ -105,7 +116,8 @@ def get_predictive_civic_risks():
 def get_anomaly_detection_report():
     complaints = db_store.get_all_complaints()
     c_count = len(complaints)
-    return detect_emerging_anomalies(today_reports_count=c_count or 47, baseline_daily_norm=5)
+    # Bug 29 Fix: Pass actual complaint count directly without artificial fallback
+    return detect_emerging_anomalies(today_reports_count=c_count, baseline_daily_norm=5)
 
 @router.get("/iot-sensors")
 def get_iot_sensor_data():

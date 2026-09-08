@@ -84,6 +84,7 @@ class AIDetectionDetails(BaseModel):
     risk_level: str = "HIGH"
     visual_summary: str
     detected_bboxes: List[Dict[str, Any]] = Field(default_factory=list)
+    analysis_type: Optional[str] = "Hybrid Computer Vision & Image Feature Classifier"
 
 class StructuredAIUnderstanding(BaseModel):
     category: ComplaintCategory
@@ -109,7 +110,7 @@ class ResolutionVerificationResult(BaseModel):
     timestamp_freshness: str = "RECENT"  # RECENT, UNKNOWN, STALE
     environment_context_match: str = "VERIFIED" # VERIFIED, INCONSISTENT
     human_review_triggered: bool = False
-    citizen_confirmation: str = "PENDING"  # PENDING, CONFIRMED, DISPUTED
+    citizen_confirmation: str = "PENDING"  # PENDING, PENDING_CITIZEN_REVIEW, CONFIRMED, DISPUTED
     fake_resolution_detected: bool = False
     confidence: float = 0.0
     match_analysis: Dict[str, Any] = Field(default_factory=dict)
@@ -149,6 +150,7 @@ class Complaint(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     officer_assigned: Optional[str] = None
+    team_assigned: Optional[str] = None
     resolution_evidence_image_url: Optional[str] = None
     resolution_officer_notes: Optional[str] = None
     verification_result: Optional[ResolutionVerificationResult] = None

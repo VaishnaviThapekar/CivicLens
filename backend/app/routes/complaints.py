@@ -72,8 +72,7 @@ class WhatsAppSimulateRequest(BaseModel):
 @router.post("", response_model=Complaint)
 def create_complaint(payload: ComplaintCreate):
     comp_id = f"c-{uuid.uuid4().hex[:6]}"
-    seq_num = 1280 + len(db_store.complaints) + 1
-    tracking_num = f"CL-NK-2026-00{seq_num}"
+    tracking_num = f"CL-NK-{datetime.now().year}-{uuid.uuid4().hex[:6].upper()}"
 
     resolved_loc = resolve_geolocation(
         payload.location.lat,
@@ -230,6 +229,7 @@ def assign_reassign_complaint(complaint_id: str, req: ReassignRequest):
     if req.department: complaint.department = req.department
     if req.officer_assigned: complaint.officer_assigned = req.officer_assigned
     if req.ward: complaint.location.ward = req.ward
+    if req.team: complaint.team_assigned = req.team
 
     complaint.status = ComplaintStatus.ASSIGNED
     complaint.updated_at = datetime.now().isoformat()
@@ -239,7 +239,8 @@ def assign_reassign_complaint(complaint_id: str, req: ReassignRequest):
         "message": "Complaint reassignment updated",
         "department": complaint.department,
         "officer_assigned": complaint.officer_assigned,
-        "ward": complaint.location.ward
+        "ward": complaint.location.ward,
+        "team": complaint.team_assigned
     }
 
 @router.post("/{complaint_id}/comments")

@@ -39,7 +39,13 @@ def verify_officer_resolution(payload: ResolutionEvidenceSubmission):
         complaint_id_or_img=payload.complaint_id,
         officer_id=payload.officer_id,
         after_image=payload.evidence_image_url,
-        officer_notes=payload.officer_notes
+        officer_notes=payload.officer_notes,
+        gps_lat=payload.gps_lat,
+        gps_lng=payload.gps_lng,
+        timestamp=payload.timestamp,
+        base_lat=complaint.location.lat if complaint and complaint.location else None,
+        base_lng=complaint.location.lng if complaint and complaint.location else None,
+        before_image=complaint.image_url if complaint else None
     )
 
     complaint.resolution_evidence_image_url = payload.evidence_image_url
@@ -50,7 +56,7 @@ def verify_officer_resolution(payload: ResolutionEvidenceSubmission):
     if verification_res.fake_resolution_detected:
         complaint.status = ComplaintStatus.REJECTED_FAKE_RESOLUTION
     else:
-        complaint.status = ComplaintStatus.RESOLVED
+        complaint.status = ComplaintStatus.AI_VERIFICATION
 
     db_store.update_complaint(complaint)
     return verification_res

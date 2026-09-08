@@ -9,6 +9,8 @@ from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from app.services.notification_engine import get_user_notifications, send_notification
+from app.db.store import db_store
+from app.models.schemas import UserProfile
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -105,18 +107,22 @@ def get_current_user_email(authorization: Optional[str] = Header(None)) -> str:
         raise HTTPException(status_code=401, detail="Missing authorization header")
     
     token = authorization.replace("Bearer ", "").strip()
-    if not token or token not in TOKENS_DB:
+    email = TOKENS_DB.get(token) or db_store.get_token(token)
+    if isinstance(email, dict):
+        email = email.get("email")
+
+    if not token or not email:
         raise HTTPException(status_code=401, detail="Invalid or expired authentication token")
     
-    email = TOKENS_DB[token]
-    if email not in USERS_DB:
+    user = USERS_DB.get(email) or db_store.get_user_by_email(email)
+    if not user:
         raise HTTPException(status_code=401, detail="User account associated with token not found")
         
     return email
 
 @router.post("/register")
 def register_user(req: RegisterRequest):
-  if req.email in USERS_DB:
+  if req.email in USERS_DB or db_store.get_user_by_email(req.email):
     raise HTTPException(status_code=400, detail="Email already registered")
 
   user_id = f"usr-{uuid.uuid4().hex[:8]}"
@@ -145,6 +151,15 @@ def register_user(req: RegisterRequest):
   }
 
   USERS_DB[req.email] = user
+  db_store.add_user(UserProfile(
+      id=user_id,
+      name=req.full_name,
+      email=req.email,
+      phone=req.phone,
+      role=req.role if req.role in ROLE_PERMISSIONS else "Citizen",
+      language_preference=req.preferred_language or "en"
+  ), hashed_password=pwd_hash)
+
   return {
     "message": "User registered successfully. Please verify your email.",
     "user_id": user_id,
@@ -166,6 +181,20 @@ def verify_email(token: str):
 def login_user(req: LoginRequest):
   user = USERS_DB.get(req.email)
   if not user:
+    db_u = db_store.get_user_by_email(req.email)
+    if db_u:
+      user = {
+        "user_id": db_u.id,
+        "email": db_u.email,
+        "password_hash": db_store.get_user_password(req.email) or default_hash,
+        "password_salt": default_salt,
+        "full_name": db_u.name,
+        "phone": db_u.phone,
+        "role": db_u.role.value if hasattr(db_u.role, "value") else str(db_u.role)
+      }
+      USERS_DB[req.email] = user
+
+  if not user:
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
   if not verify_password(req.password, user["password_hash"], user.get("password_salt", default_salt)):
@@ -176,6 +205,8 @@ def login_user(req: LoginRequest):
 
   TOKENS_DB[access_token] = req.email
   TOKENS_DB[refresh_token] = req.email
+  db_store.save_token(access_token, {"email": req.email})
+  db_store.save_token(refresh_token, {"email": req.email})
 
   return {
     "access_token": access_token,

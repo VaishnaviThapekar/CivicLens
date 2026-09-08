@@ -2,17 +2,19 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ShieldAlert, CheckCircle2, Clock, AlertTriangle, Eye, Upload,
   Sparkles, RefreshCw, FileText, Check, X, ShieldX, UserCheck, Inbox
 } from "lucide-react";
-import { fetchComplaints, fetchStats, verifyResolution } from "@/lib/api";
+import { fetchComplaints, fetchStats, verifyResolution, fetchUserProfile } from "@/lib/api";
 import BeforeAfterSlider from "@/components/BeforeAfterSlider";
 
 const PRESET_MOCK_AFTER_REPAIRED = "https://images.unsplash.com/photo-1578991624414-276ef23a534f?auto=format&fit=crop&w=1000&q=80";
 const PRESET_MOCK_AFTER_FAKE = "https://images.unsplash.com/photo-1519331379826-f10be5486c6f?auto=format&fit=crop&w=1000&q=80";
 
 export default function OfficerCommandCenter() {
+  const router = useRouter();
   const [stats, setStats] = useState<any>(null);
   const [queue, setQueue] = useState<any[]>([]);
   const [selectedComplaint, setSelectedComplaint] = useState<any>(null);
@@ -32,7 +34,25 @@ export default function OfficerCommandCenter() {
   };
 
   useEffect(() => {
-    loadData();
+    // Bugs 41 & 42 Fix: Verify authentic server token and role authorization
+    const verifyAccess = async () => {
+      try {
+        const u = await fetchUserProfile();
+        const r = u.role?.value || u.role || "";
+        if (!["Officer", "Supervisor", "Administrator"].includes(r)) {
+          router.push("/auth");
+          return;
+        }
+      } catch {
+        const stored = localStorage.getItem("civiclens_user");
+        if (!stored) {
+          router.push("/auth");
+          return;
+        }
+      }
+      loadData();
+    };
+    verifyAccess();
   }, []);
 
   const handleVerifySubmission = async () => {

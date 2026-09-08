@@ -12,7 +12,7 @@ from app.services.nlp_routing import parse_multilingual_report
 from app.services.ai_vision import analyze_complaint_image
 from app.services.spatial_cluster import cluster_complaints
 from app.services.geo_intelligence import resolve_geolocation
-from app.services.whatsapp_bot import process_incoming_whatsapp_message
+from app.services.websocket_manager import notify_complaint_created, notify_status_changed
 
 router = APIRouter(prefix="/api/complaints", tags=["Complaints"])
 
@@ -130,6 +130,7 @@ def create_complaint(payload: ComplaintCreate):
             break
 
     db_store.add_complaint(new_complaint)
+    notify_complaint_created(new_complaint)
     return new_complaint
 
 @router.post("/whatsapp-simulate")
@@ -205,6 +206,7 @@ def update_complaint_status(complaint_id: str, req: StatusUpdateRequest):
         "notes": req.notes or f"Status updated to {complaint.status.value}"
     })
     db_store.update_complaint(complaint)
+    notify_status_changed(complaint_id, complaint.status.value, complaint.tracking_number)
 
     return {"status": "success", "new_status": complaint.status.value, "notes": req.notes}
 
@@ -272,13 +274,9 @@ def assign_reassign_complaint(complaint_id: str, req: ReassignRequest):
 
 @router.post("/{complaint_id}/comments")
 def add_comment(complaint_id: str, req: CommentRequest):
-    # Bug 11 Fix: Verify complaint exists before attaching comments
     complaint = db_store.get_complaint_by_id(complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail=f"Complaint with ID '{complaint_id}' not found")
-
-    if complaint_id not in COMMENTS_STORE:
-        COMMENTS_STORE[complaint_id] = []
 
     c_entry = {
         "id": f"comment-{uuid.uuid4().hex[:6]}",
@@ -287,7 +285,7 @@ def add_comment(complaint_id: str, req: CommentRequest):
         "text": req.text,
         "timestamp": datetime.now().isoformat()
     }
-    COMMENTS_STORE[complaint_id].append(c_entry)
+    db_store.add_comment(complaint_id, c_entry)
     return {"message": "Comment added", "comment": c_entry}
 
 @router.get("/{complaint_id}/comments")
@@ -295,16 +293,13 @@ def get_comments(complaint_id: str):
     complaint = db_store.get_complaint_by_id(complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail=f"Complaint with ID '{complaint_id}' not found")
-    return {"comments": COMMENTS_STORE.get(complaint_id, [])}
+    return {"comments": db_store.get_comments(complaint_id)}
 
 @router.post("/{complaint_id}/attachments")
 def add_attachment(complaint_id: str, req: AttachmentRequest):
     complaint = db_store.get_complaint_by_id(complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail=f"Complaint with ID '{complaint_id}' not found")
-
-    if complaint_id not in ATTACHMENTS_STORE:
-        ATTACHMENTS_STORE[complaint_id] = []
 
     a_entry = {
         "id": f"att-{uuid.uuid4().hex[:6]}",
@@ -313,7 +308,7 @@ def add_attachment(complaint_id: str, req: AttachmentRequest):
         "description": req.description,
         "timestamp": datetime.now().isoformat()
     }
-    ATTACHMENTS_STORE[complaint_id].append(a_entry)
+    db_store.add_attachment(complaint_id, a_entry)
     return {"message": "Attachment uploaded", "attachment": a_entry}
 
 @router.get("/{complaint_id}/attachments")
@@ -321,7 +316,7 @@ def get_attachments(complaint_id: str):
     complaint = db_store.get_complaint_by_id(complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail=f"Complaint with ID '{complaint_id}' not found")
-    return {"attachments": ATTACHMENTS_STORE.get(complaint_id, [])}
+    return {"attachments": db_store.get_attachments(complaint_id)}
 
 @router.post("/{complaint_id}/citizen-confirm")
 def confirm_resolution(complaint_id: str, action: str = Query(..., pattern="^(CONFIRMED|DISPUTED)$")):

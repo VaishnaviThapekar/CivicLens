@@ -15,9 +15,14 @@ export default function AuthPage() {
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
-  // Sign In Form State
-  const [loginEmail, setLoginEmail] = useState("citizen@civiclens.org");
-  const [loginPassword, setLoginPassword] = useState("password123");
+  // Bug 43 Fix: Default login input state to empty strings rather than pre-filling credentials
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+
+  const fillDemoCredentials = (email: string, pass: string = "password123") => {
+    setLoginEmail(email);
+    setLoginPassword(pass);
+  };
 
   // Sign Up Form State
   const [fullName, setFullName] = useState("");

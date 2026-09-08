@@ -22,48 +22,70 @@ class EmergencyBroadcastPayload(BaseModel):
 
 @router.get("/contractors")
 def get_contractor_rankings():
+    """
+    Bug 48 Fix: Derive contractor analytics metrics dynamically from actual complaints in db_store.
+    """
     complaints = db_store.get_all_complaints()
-    total = len(complaints)
-    fake_count = sum(1 for c in complaints if c.status == ComplaintStatus.REJECTED_FAKE_RESOLUTION)
-    verified_count = sum(1 for c in complaints if c.verification_result and c.verification_result.visual_evidence_valid)
-
-    pass_rate = round((verified_count / max(1, verified_count + fake_count)) * 100.0, 1) if (verified_count + fake_count) > 0 else 100.0
-    penalty_deduction = fake_count * 25000  # ₹25,000 SLA penalty per fake resolution
-
-    return [
-        {
-            "contractor_id": "CON-101",
-            "name": "Apex Roadways & PWD Infra Ltd",
-            "department": "Municipal Road & Bridges Division",
-            "total_assigned": max(12, total),
-            "ai_verification_pass_rate": pass_rate,
-            "fake_flag_count": fake_count,
-            "sla_breach_penalties_inr": f"₹{penalty_deduction:,}",
-            "avg_repair_days": 2.4 if total > 0 else 1.8,
-            "quality_rating": "A+ (Excellent)" if fake_count == 0 else "Under Penalty Audit"
-        },
-        {
-            "contractor_id": "CON-102",
-            "name": "Metro Sanitation & Waste Logistics",
-            "department": "Sanitation & Waste Division",
-            "total_assigned": 18,
-            "ai_verification_pass_rate": 94.5,
-            "fake_flag_count": 1,
-            "sla_breach_penalties_inr": "₹25,000",
-            "avg_repair_days": 1.2,
-            "quality_rating": "A (Good)"
-        }
+    contractor_defs = [
+        {"id": "CON-101", "name": "Apex Roadways & PWD Infra Ltd", "dept_keyword": "road"},
+        {"id": "CON-102", "name": "Metro Sanitation & Waste Logistics", "dept_keyword": "sanitation"},
+        {"id": "CON-103", "name": "Lumina Electrical Grid Corp", "dept_keyword": "electrical"},
+        {"id": "CON-104", "name": "AquaFlow Water Systems Ltd", "dept_keyword": "water"}
     ]
+
+    rankings = []
+    for c_def in contractor_defs:
+        key = c_def["dept_keyword"]
+        dept_c = [c for c in complaints if key in (c.department or "").lower() or key in (c.category.value if hasattr(c.category, 'value') else str(c.category)).lower()]
+        
+        assigned = len(dept_c)
+        fakes = sum(1 for c in dept_c if c.status == ComplaintStatus.REJECTED_FAKE_RESOLUTION)
+        verified = sum(1 for c in dept_c if c.verification_result and c.verification_result.visual_evidence_valid)
+        
+        pass_rate = round((verified / max(1, verified + fakes)) * 100.0, 1) if (verified + fakes) > 0 else 100.0
+        penalty_deduction = fakes * 25000
+
+        # Calculate avg repair days for resolved complaints in department
+        resolved_c = [c for c in dept_c if c.status in [ComplaintStatus.RESOLVED, ComplaintStatus.CLOSED, ComplaintStatus.AI_VERIFICATION]]
+        if resolved_c:
+            days_list = []
+            for c in resolved_c:
+                try:
+                    c_dt = datetime.fromisoformat(c.created_at.replace("Z", "+00:00"))
+                    u_dt = datetime.fromisoformat(c.updated_at.replace("Z", "+00:00"))
+                    days_list.append(max(0.1, (u_dt - c_dt).total_seconds() / 86400.0))
+                except Exception:
+                    days_list.append(1.5)
+            avg_days = round(sum(days_list) / len(days_list), 1)
+        else:
+            avg_days = 0.0
+
+        rankings.append({
+            "contractor_id": c_def["id"],
+            "name": c_def["name"],
+            "department": f"Municipal {key.capitalize()} Cell",
+            "total_assigned": assigned,
+            "ai_verification_pass_rate": pass_rate,
+            "fake_flag_count": fakes,
+            "sla_breach_penalties_inr": f"₹{penalty_deduction:,}",
+            "avg_repair_days": avg_days,
+            "quality_rating": "A+ (Excellent)" if fakes == 0 else "Under Penalty Audit"
+        })
+
+    return rankings
 
 @router.post("/cpgrams/sync/{complaint_id}")
 def sync_with_cpgrams(complaint_id: str):
+    """
+    Bug 49 Fix: Clarify CPGRAMS dossier export formatting response wording.
+    """
     complaint = db_store.get_complaint_by_id(complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
 
     dossier = format_cpgrams_dossier(complaint)
     return {
-        "message": "Grievance successfully synchronized with National CPGRAMS Portal",
+        "message": "CPGRAMS-compliant grievance dossier generated successfully. Ready for National CPGRAMS Portal submission.",
         "cpgrams_dossier": dossier
     }
 

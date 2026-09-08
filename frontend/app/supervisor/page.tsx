@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ShieldAlert, ShieldCheck, UserCheck, AlertTriangle, FileText,
   Award, RefreshCw, Sparkles, Building2, AlertCircle, Download, CheckCircle2
 } from "lucide-react";
+import { fetchUserProfile } from "@/lib/api";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
 export default function SupervisorPortal() {
+  const router = useRouter();
   const [contractors, setContractors] = useState<any[]>([]);
   const [auditLog, setAuditLog] = useState<any>(null);
   const [cpgramsResult, setCpgramsResult] = useState<any>(null);
@@ -15,8 +20,8 @@ export default function SupervisorPortal() {
   const loadSupervisorData = async () => {
     setLoading(true);
     try {
-      const cRes = await fetch("http://localhost:8000/api/supervisor/contractors");
-      const aRes = await fetch("http://localhost:8000/api/supervisor/audit-log");
+      const cRes = await fetch(`${API_BASE}/supervisor/contractors`);
+      const aRes = await fetch(`${API_BASE}/supervisor/audit-log`);
       if (cRes.ok) setContractors(await cRes.json());
       if (aRes.ok) setAuditLog(await aRes.json());
     } catch (err) {
@@ -27,12 +32,29 @@ export default function SupervisorPortal() {
   };
 
   useEffect(() => {
-    loadSupervisorData();
+    const verifyAccess = async () => {
+      try {
+        const u = await fetchUserProfile();
+        const r = u.role?.value || u.role || "";
+        if (!["Supervisor", "Administrator"].includes(r)) {
+          router.push("/auth");
+          return;
+        }
+      } catch {
+        const stored = localStorage.getItem("civiclens_user");
+        if (!stored) {
+          router.push("/auth");
+          return;
+        }
+      }
+      loadSupervisorData();
+    };
+    verifyAccess();
   }, []);
 
   const handleSyncCPGRAMS = async (complaintId: string = "c-101") => {
     try {
-      const res = await fetch(`http://localhost:8000/api/supervisor/cpgrams/sync/${complaintId}`, {
+      const res = await fetch(`${API_BASE}/supervisor/cpgrams/sync/${complaintId}`, {
         method: "POST"
       });
       if (res.ok) {

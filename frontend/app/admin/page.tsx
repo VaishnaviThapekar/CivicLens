@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Cpu, Terminal, Users, Database, Shield, Check, Play, MapPin } from "lucide-react";
+import { fetchUserProfile } from "@/lib/api";
 
 const SYSTEM_ROLES = [
   { role: "Citizen", desc: "Report issues via photo/voice/video, track ticket timeline, confirm resolution." },
@@ -13,10 +15,31 @@ const SYSTEM_ROLES = [
 ];
 
 export default function AdminConsole() {
+  const router = useRouter();
   const [activeRole, setActiveRole] = useState("Administrator");
   const [sqlQuery, setSqlQuery] = useState("SELECT * FROM civic_incidents WHERE ST_DWithin(geom, ST_SetSRID(ST_Point(73.7898, 19.9975), 4326), 0.005);");
   const [queryOutput, setQueryOutput] = useState<any>(null);
   const [executing, setExecuting] = useState(false);
+
+  useEffect(() => {
+    const verifyAccess = async () => {
+      try {
+        const u = await fetchUserProfile();
+        const r = u.role?.value || u.role || "";
+        if (r !== "Administrator" && r !== "Supervisor") {
+          router.push("/auth");
+          return;
+        }
+      } catch {
+        const stored = localStorage.getItem("civiclens_user");
+        if (!stored) {
+          router.push("/auth");
+          return;
+        }
+      }
+    };
+    verifyAccess();
+  }, []);
 
   const handleExecuteSql = () => {
     setExecuting(true);

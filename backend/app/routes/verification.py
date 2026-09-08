@@ -51,15 +51,29 @@ def verify_officer_resolution(payload: ResolutionEvidenceSubmission):
     complaint.resolution_evidence_image_url = payload.evidence_image_url
     complaint.resolution_officer_notes = payload.officer_notes
     complaint.verification_result = verification_res
-    complaint.updated_at = datetime.now().isoformat()
+    now_iso = datetime.now().isoformat()
+    complaint.updated_at = now_iso
 
+    # Bug 34 Fix: Enforce lifecycle status workflow consistency (AI_VERIFICATION or REJECTED_FAKE_RESOLUTION)
     if verification_res.fake_resolution_detected:
         complaint.status = ComplaintStatus.REJECTED_FAKE_RESOLUTION
     else:
         complaint.status = ComplaintStatus.AI_VERIFICATION
 
+    complaint.status_history.append({
+        "status": complaint.status.value,
+        "timestamp": now_iso,
+        "actor": "Officer & AI Inspector",
+        "notes": verification_res.message
+    })
+
     db_store.update_complaint(complaint)
     return verification_res
+
+# Bug 37 Fix: Backend route alias handler for /verify endpoint (matches frontend api.ts call)
+@router.post("/verify", response_model=ResolutionVerificationResult)
+def verify_resolution_alias(payload: ResolutionEvidenceSubmission):
+    return verify_officer_resolution(payload)
 
 @router.post("/citizen-feedback")
 def submit_citizen_feedback(payload: CitizenFeedbackSubmission):
@@ -77,7 +91,15 @@ def submit_citizen_feedback(payload: CitizenFeedbackSubmission):
         complaint.status = ComplaintStatus.IN_PROGRESS
         msg = "⚠️ Issue marked partially fixed. Sent back for field contractor inspection."
 
-    complaint.updated_at = datetime.now().isoformat()
+    now_iso = datetime.now().isoformat()
+    complaint.updated_at = now_iso
+    complaint.status_history.append({
+        "status": complaint.status.value,
+        "timestamp": now_iso,
+        "actor": "Citizen Feedback",
+        "notes": msg
+    })
+
     db_store.update_complaint(complaint)
 
     return {
@@ -88,16 +110,34 @@ def submit_citizen_feedback(payload: CitizenFeedbackSubmission):
 
 @router.get("/{complaint_id}/timeline")
 def get_resolution_timeline(complaint_id: str):
+    """
+    Bugs 35 & 36 Fixes: Dynamically generates timeline stages based ONLY on actual executed events in complaint.status_history
+    with real event timestamps.
+    """
     complaint = db_store.get_complaint_by_id(complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint ID not found")
 
-    timeline = [
-        {"stage": "Reported", "date": complaint.created_at, "actor": "Citizen", "desc": "Multimodal issue report submitted"},
-        {"stage": "AI Analysis", "date": complaint.created_at, "actor": "CivicLens AI", "desc": f"Category: {complaint.category.value}, Priority: {complaint.priority.value}"},
-        {"stage": "Assigned", "date": complaint.created_at, "actor": "Supervisor System", "desc": f"Assigned to {complaint.department}"},
-        {"stage": "Work In Progress", "date": complaint.updated_at, "actor": "PWD Field Team", "desc": "Asphalt compaction / repair crew dispatched"},
-        {"stage": "Resolved & Verified", "date": complaint.updated_at, "actor": "Officer & AI Inspector", "desc": "Resolution evidence uploaded & CV SSIM verified"}
-    ]
+    timeline = []
+    if complaint.status_history:
+        for idx, entry in enumerate(complaint.status_history):
+            st = entry.get("status", "Updated")
+            ts = entry.get("timestamp", complaint.created_at)
+            act = entry.get("actor", "System")
+            notes = entry.get("notes", f"Status updated to {st}")
+
+            timeline.append({
+                "stage": st,
+                "date": ts,
+                "actor": act,
+                "desc": notes
+            })
+    else:
+        timeline.append({
+            "stage": ComplaintStatus.SUBMITTED.value,
+            "date": complaint.created_at,
+            "actor": "Citizen",
+            "desc": "Multimodal issue report submitted"
+        })
 
     return {"complaint_id": complaint_id, "timeline": timeline}

@@ -111,7 +111,13 @@ def create_complaint(payload: ComplaintCreate):
         ai_detection=cv_result,
         structured_understanding=nlp_result["structured_understanding"],
         created_at=datetime.now().isoformat(),
-        updated_at=datetime.now().isoformat()
+        updated_at=datetime.now().isoformat(),
+        status_history=[{
+            "status": ComplaintStatus.SUBMITTED.value,
+            "timestamp": datetime.now().isoformat(),
+            "actor": "Citizen",
+            "notes": "Multimodal issue report submitted"
+        }]
     )
 
     all_complaints = list(db_store.complaints.values()) + [new_complaint]
@@ -190,7 +196,14 @@ def update_complaint_status(complaint_id: str, req: StatusUpdateRequest):
     validate_status_transition(complaint.status, new_st)
 
     complaint.status = new_st
-    complaint.updated_at = datetime.now().isoformat()
+    now_iso = datetime.now().isoformat()
+    complaint.updated_at = now_iso
+    complaint.status_history.append({
+        "status": complaint.status.value,
+        "timestamp": now_iso,
+        "actor": "System / Officer",
+        "notes": req.notes or f"Status updated to {complaint.status.value}"
+    })
     db_store.update_complaint(complaint)
 
     return {"status": "success", "new_status": complaint.status.value, "notes": req.notes}
@@ -204,7 +217,14 @@ def reopen_complaint(complaint_id: str, reason: str = Body(..., embed=True)):
     validate_status_transition(complaint.status, ComplaintStatus.REOPENED)
 
     complaint.status = ComplaintStatus.REOPENED
-    complaint.updated_at = datetime.now().isoformat()
+    now_iso = datetime.now().isoformat()
+    complaint.updated_at = now_iso
+    complaint.status_history.append({
+        "status": complaint.status.value,
+        "timestamp": now_iso,
+        "actor": "Citizen",
+        "notes": f"⚠️ Issue Reopened: {reason}"
+    })
     db_store.update_complaint(complaint)
 
     if complaint_id not in COMMENTS_STORE:
@@ -213,7 +233,7 @@ def reopen_complaint(complaint_id: str, reason: str = Body(..., embed=True)):
         "author": "Citizen / System",
         "type": "citizen",
         "text": f"⚠️ Issue Reopened: {reason}",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_iso
     })
 
     return {"message": "Issue successfully reopened and escalated to supervisor.", "status": complaint.status.value}
@@ -232,7 +252,14 @@ def assign_reassign_complaint(complaint_id: str, req: ReassignRequest):
     if req.team: complaint.team_assigned = req.team
 
     complaint.status = ComplaintStatus.ASSIGNED
-    complaint.updated_at = datetime.now().isoformat()
+    now_iso = datetime.now().isoformat()
+    complaint.updated_at = now_iso
+    complaint.status_history.append({
+        "status": complaint.status.value,
+        "timestamp": now_iso,
+        "actor": "Supervisor",
+        "notes": f"Assigned to {complaint.department} ({complaint.officer_assigned or 'Officer'})"
+    })
     db_store.update_complaint(complaint)
 
     return {

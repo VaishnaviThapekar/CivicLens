@@ -154,6 +154,7 @@ class Complaint(BaseModel):
     resolution_evidence_image_url: Optional[str] = None
     resolution_officer_notes: Optional[str] = None
     verification_result: Optional[ResolutionVerificationResult] = None
+    status_history: List[Dict[str, Any]] = Field(default_factory=list)
 
 class CivicIncidentCluster(BaseModel):
     cluster_id: str

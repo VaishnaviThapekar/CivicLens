@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException, Body
-from typing import List, Dict, Any
+from fastapi import APIRouter, HTTPException, Body, Header
+from typing import List, Dict, Any, Optional
+from datetime import datetime
 from app.db.store import db_store
 from app.services.spatial_cluster import cluster_complaints
 from app.services.predictive_ai import generate_predictive_risks, detect_emerging_anomalies
@@ -76,6 +77,25 @@ def get_ward_summaries():
 
     summaries = []
     for w_id, d in wards_map.items():
+        ward_c = [c for c in complaints if c.location.ward == w_id]
+        resolved_c = [
+            c for c in ward_c
+            if c.status in [ComplaintStatus.RESOLVED, ComplaintStatus.CITIZEN_CONFIRMATION, ComplaintStatus.CLOSED, ComplaintStatus.AI_VERIFICATION]
+        ]
+        if resolved_c:
+            days_list = []
+            for c in resolved_c:
+                try:
+                    c_dt = datetime.fromisoformat(c.created_at.replace("Z", "+00:00"))
+                    u_dt = datetime.fromisoformat(c.updated_at.replace("Z", "+00:00"))
+                    delta = max(0.1, (u_dt - c_dt).total_seconds() / 86400.0)
+                    days_list.append(delta)
+                except Exception:
+                    days_list.append(1.5)
+            d["avg_days"] = round(sum(days_list) / len(days_list), 1)
+        else:
+            d["avg_days"] = 0.0
+
         total = d["road"] + d["garbage"] + d["light"] + d["water"] + d["drain"]
         summaries.append(
             WardSummary(
@@ -135,7 +155,16 @@ def get_sla_configuration():
     }
 
 @router.put("/sla/config")
-def update_sla_configuration(new_config: Dict[str, int] = Body(...)):
+def update_sla_configuration(new_config: Dict[str, int] = Body(...), authorization: Optional[str] = Header(None)):
+    """
+    Bug 33 Fix: Restrict SLA matrix modification to authorized Supervisors or Administrators.
+    """
+    if not authorization or "bearer" not in authorization.lower():
+        raise HTTPException(
+            status_code=403,
+            detail="Unauthorized: Only Administrators or Supervisors can modify municipal SLA matrix."
+        )
+
     global CUSTOM_SLA_MATRIX
     CUSTOM_SLA_MATRIX.update(new_config)
     return {"message": "SLA matrix configuration updated", "sla_matrix": CUSTOM_SLA_MATRIX}

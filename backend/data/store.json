@@ -28,12 +28,13 @@
     "structured_understanding": null,
     "cluster_id": null,
     "submitted_by": "Citizen",
-    "created_at": "2026-09-08T22:49:49.753871",
-    "updated_at": "2026-09-08T22:49:49.753891",
+    "created_at": "2026-09-08T22:53:58.465926",
+    "updated_at": "2026-09-08T22:53:58.465934",
     "officer_assigned": null,
     "team_assigned": null,
     "resolution_evidence_image_url": null,
     "resolution_officer_notes": null,
-    "verification_result": null
+    "verification_result": null,
+    "status_history": []
   }
 }

@@ -41,7 +41,20 @@ def verify_officer_resolution(
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint ID not found")
 
-    officer_identity = current_user.get("user_id") or payload.officer_id
+    user_role = current_user.get("role")
+    user_email = current_user.get("email")
+    user_id = current_user.get("user_id")
+
+    # Officer ticket assignment guardrail
+    if user_role == "Officer":
+        assigned_to = complaint.officer_assigned
+        if assigned_to and assigned_to not in [user_email, user_id, current_user.get("full_name")]:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Officer '{user_email}' is not authorized to submit resolution evidence for a complaint assigned to '{assigned_to}'"
+            )
+
+    officer_identity = user_email or user_id
 
     verification_res = verify_resolution(
         complaint_id_or_img=payload.complaint_id,

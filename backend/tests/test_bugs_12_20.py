@@ -80,8 +80,9 @@ def test_bug_14_dynamic_unique_tracking_number():
         "location": {"lat": 19.9975, "lng": 73.7898, "ward": "Ward 63"}
     }
 
-    res1 = client.post("/api/complaints", json=payload)
-    res2 = client.post("/api/complaints", json=payload)
+    token = create_access_token("citizen@civiclens.org", "Citizen", "usr-citizen-001")
+    res1 = client.post("/api/complaints", json=payload, headers={"Authorization": f"Bearer {token}"})
+    res2 = client.post("/api/complaints", json=payload, headers={"Authorization": f"Bearer {token}"})
 
     assert res1.status_code == 200
     assert res2.status_code == 200

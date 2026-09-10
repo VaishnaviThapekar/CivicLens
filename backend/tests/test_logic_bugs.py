@@ -74,7 +74,9 @@ def test_bug9_clustered_complaint_status():
             "ward": "Ward 63"
         }
     }
-    res = client.post("/api/complaints/", json=payload)
+    from app.routes.auth import create_access_token
+    token = create_access_token("citizen@civiclens.org", "Citizen", "usr-citizen-001")
+    res = client.post("/api/complaints/", json=payload, headers={"Authorization": f"Bearer {token}"})
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "Submitted"  # Must remain SUBMITTED, not IN_PROGRESS
@@ -94,7 +96,9 @@ def test_bug10_audio_cv_decoupling():
             "ward": "Ward 63"
         }
     }
-    res = client.post("/api/complaints/", json=payload)
+    from app.routes.auth import create_access_token
+    token = create_access_token("citizen@civiclens.org", "Citizen", "usr-citizen-001")
+    res = client.post("/api/complaints/", json=payload, headers={"Authorization": f"Bearer {token}"})
     assert res.status_code == 200
     data = res.json()
     assert data["ai_detection"] is None  # Must be None since no image payload was supplied

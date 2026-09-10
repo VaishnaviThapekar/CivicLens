@@ -148,6 +148,8 @@ class Complaint(BaseModel):
     structured_understanding: Optional[StructuredAIUnderstanding] = None
     cluster_id: Optional[str] = None
     submitted_by: str = "Citizen"
+    submitted_by_user_id: Optional[str] = None
+    submitted_by_email: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     officer_assigned: Optional[str] = None

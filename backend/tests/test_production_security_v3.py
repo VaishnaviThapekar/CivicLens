@@ -28,16 +28,16 @@ def test_google_oauth_cryptographic_verification():
 
 def test_rbac_endpoint_protections():
     c_id = "c-sec-test-01"
+    citizen_token = create_access_token("citizen@civiclens.org", "Citizen", "usr-citizen-001")
+    officer_token = create_access_token("officer@civiclens.org", "Officer", "usr-officer-001")
+    supervisor_token = create_access_token("supervisor@civiclens.org", "Supervisor", "usr-supervisor-001")
+
     # Create test complaint in DB
     client.post("/api/complaints", json={
         "title": "Road damage test issue",
         "description": "Security test complaint description",
         "location": {"lat": 19.9975, "lng": 73.7898, "ward": "Ward 63"}
-    })
-
-    citizen_token = create_access_token("citizen@civiclens.org", "Citizen", "usr-citizen-001")
-    officer_token = create_access_token("officer@civiclens.org", "Officer", "usr-officer-001")
-    supervisor_token = create_access_token("supervisor@civiclens.org", "Supervisor", "usr-supervisor-001")
+    }, headers={"Authorization": f"Bearer {citizen_token}"})
 
     # 1. Status Update: Unauthenticated (401), Citizen (403), Officer (200)
     res_unauth = client.put(f"/api/complaints/{c_id}/status", json={"status": "in_progress"})

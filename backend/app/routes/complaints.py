@@ -129,7 +129,7 @@ class WhatsAppSimulateRequest(BaseModel):
   media_url: Optional[str] = "https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=600&auto=format&fit=crop"
 
 @router.post("", response_model=Complaint)
-def create_complaint(payload: ComplaintCreate, current_user: Optional[Dict[str, Any]] = Depends(get_optional_user)):
+def create_complaint(payload: ComplaintCreate, current_user: Dict[str, Any] = Depends(get_current_user)):
     comp_id = f"c-{uuid.uuid4().hex[:6]}"
     tracking_num = f"CL-NK-{datetime.now().year}-{uuid.uuid4().hex[:6].upper()}"
 
@@ -152,7 +152,8 @@ def create_complaint(payload: ComplaintCreate, current_user: Optional[Dict[str, 
         payload.description if image_input else ""
     )
 
-    submitted_by = current_user.get("email") if current_user else "citizen@civiclens.org"
+    sub_email = current_user.get("email") or "citizen@civiclens.org"
+    sub_uid = current_user.get("user_id") or "usr-citizen-001"
 
     new_complaint = Complaint(
         id=comp_id,
@@ -166,7 +167,9 @@ def create_complaint(payload: ComplaintCreate, current_user: Optional[Dict[str, 
         priority_reason=nlp_result["priority_reason"],
         status=ComplaintStatus.SUBMITTED,
         location=resolved_loc,
-        submitted_by=submitted_by,
+        submitted_by=sub_email,
+        submitted_by_user_id=sub_uid,
+        submitted_by_email=sub_email,
         image_url=payload.image_url,
         video_url=payload.video_url,
         voice_transcript=payload.voice_transcript,
@@ -177,7 +180,7 @@ def create_complaint(payload: ComplaintCreate, current_user: Optional[Dict[str, 
         status_history=[{
             "status": ComplaintStatus.SUBMITTED.value,
             "timestamp": datetime.now().isoformat(),
-            "actor": f"Citizen ({submitted_by})",
+            "actor": f"Citizen ({sub_email})",
             "notes": "Multimodal issue report submitted"
         }]
     )
@@ -204,12 +207,21 @@ def simulate_whatsapp_bot_message(req: WhatsAppSimulateRequest):
     )
 
 @router.get("/my", response_model=List[Complaint])
-def get_my_complaints(email: str = Depends(get_current_user_email)):
+def get_my_complaints(
+    email: str = Depends(get_current_user_email),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """
-    Bug 28 Fix: Citizen-isolated complaints query endpoint (returns only complaints belonging strictly to authenticated user).
+    Bug 28 Fix: Citizen-isolated complaints query endpoint (returns only complaints belonging strictly to authenticated user ID/email).
     """
     all_c = db_store.get_all_complaints()
-    return [c for c in all_c if getattr(c, "submitted_by", None) == email]
+    u_id = current_user.get("user_id")
+    return [
+        c for c in all_c
+        if getattr(c, "submitted_by_email", None) == email
+        or getattr(c, "submitted_by", None) == email
+        or (u_id and getattr(c, "submitted_by_user_id", None) == u_id)
+    ]
 
 @router.get("", response_model=List[Complaint])
 def get_complaints(
@@ -248,7 +260,11 @@ def get_complaint_detail(complaint_id: str, authorization: Optional[str] = Heade
         try:
             email = get_current_user_email(authorization)
             user = get_current_user(email)
-            if user.get("role") in ["Officer", "Supervisor", "Administrator"] or getattr(complaint, "submitted_by", None) == email:
+            u_id = user.get("user_id")
+            if (user.get("role") in ["Officer", "Supervisor", "Administrator"] or
+                getattr(complaint, "submitted_by_email", None) == email or
+                getattr(complaint, "submitted_by", None) == email or
+                (u_id and getattr(complaint, "submitted_by_user_id", None) == u_id)):
                 is_authorized = True
         except Exception:
             pass

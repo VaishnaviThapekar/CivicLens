@@ -52,22 +52,31 @@ v1_router.include_router(intelligence.router)
 v1_router.include_router(supervisor.router)
 app.include_router(v1_router)
 
-# Bugs 45 & 46 Fix: Authenticated & Structured Event WebSocket Connection Handler
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
-    if token:
-        try:
-            get_current_user_email(f"Bearer {token}")
-        except Exception:
-            await websocket.close(code=4001, reason="Unauthorized connection")
-            return
+    # Enforce WebSocket JWT token authentication
+    effective_token = token
+    if not effective_token:
+        auth_hdr = websocket.headers.get("authorization") or websocket.headers.get("sec-websocket-protocol")
+        if auth_hdr:
+            effective_token = auth_hdr.replace("Bearer ", "").strip()
+
+    if not effective_token:
+        await websocket.close(code=4001, reason="Unauthorized connection: Authentication token required")
+        return
+
+    try:
+        user_email = get_current_user_email(f"Bearer {effective_token}")
+    except Exception:
+        await websocket.close(code=4001, reason="Unauthorized connection: Invalid or expired token")
+        return
 
     await manager.connect(websocket)
     try:
         while True:
             data = await websocket.receive_text()
             # Echo ping / heartbeat
-            await websocket.send_json({"type": "HEARTBEAT_ACK", "time": datetime.now().isoformat()})
+            await websocket.send_json({"type": "HEARTBEAT_ACK", "time": datetime.now().isoformat(), "user": user_email})
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 

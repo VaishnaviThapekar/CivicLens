@@ -52,7 +52,9 @@ def test_submit_complaint():
             "ward": "Ward 63"
         }
     }
-    res = client.post("/api/complaints/", json=payload)
+    from app.routes.auth import create_access_token
+    token = create_access_token("citizen@civiclens.org", "Citizen", "usr-citizen-001")
+    res = client.post("/api/complaints/", json=payload, headers={"Authorization": f"Bearer {token}"})
     assert res.status_code == 200
     data = res.json()
     assert "tracking_number" in data

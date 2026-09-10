@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Body, Header
+from fastapi import APIRouter, HTTPException, Body, Header, Depends
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from app.db.store import db_store
@@ -9,6 +9,7 @@ from app.services.duplicate_detector import analyze_root_cause_clusters
 from app.services.sla_engine import DEFAULT_SLA_CONFIG, calculate_sla_deadline
 from app.services.iot_sensor import get_live_iot_sensor_feed, get_drone_inspection_audits
 from app.models.schemas import WardSummary, StatsOverview, PredictiveRisk, CivicIncidentCluster, ComplaintStatus
+from app.routes.auth import require_role, get_current_user
 
 router = APIRouter(prefix="/api/intelligence", tags=["Civic Intelligence"])
 
@@ -155,19 +156,16 @@ def get_sla_configuration():
     }
 
 @router.put("/sla/config")
-def update_sla_configuration(new_config: Dict[str, int] = Body(...), authorization: Optional[str] = Header(None)):
+def update_sla_configuration(
+    new_config: Dict[str, int] = Body(...),
+    user: Dict[str, Any] = Depends(require_role("Supervisor", "Administrator"))
+):
     """
-    Bug 33 Fix: Restrict SLA matrix modification to authorized Supervisors or Administrators.
+    Bug 12 & Bug 33 Fix: Restrict SLA matrix modification to authorized Supervisors or Administrators.
     """
-    if not authorization or "bearer" not in authorization.lower():
-        raise HTTPException(
-            status_code=403,
-            detail="Unauthorized: Only Administrators or Supervisors can modify municipal SLA matrix."
-        )
-
     global CUSTOM_SLA_MATRIX
     CUSTOM_SLA_MATRIX.update(new_config)
-    return {"message": "SLA matrix configuration updated", "sla_matrix": CUSTOM_SLA_MATRIX}
+    return {"message": "SLA matrix configuration updated", "sla_matrix": CUSTOM_SLA_MATRIX, "updated_by": user.get("email")}
 
 @router.get("/sla/tracking/{complaint_id}")
 def get_complaint_sla_tracking(complaint_id: str):
@@ -199,9 +197,16 @@ def get_participatory_budget_proposals():
     return get_proposals()
 
 @router.post("/governance/proposals/vote")
-def vote_participatory_proposal(proposal_id: str = Body(..., embed=True), karma_pts: int = Body(50, embed=True)):
+def vote_participatory_proposal(
+    proposal_id: str = Body(..., embed=True),
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Bug 13 Fix: Server-side voting power calculation from authenticated user context.
+    """
     from app.services.participatory_budgeting import vote_proposal
-    return vote_proposal(proposal_id=proposal_id, karma_pts=karma_pts)
+    user_karma = user.get("karma_points", 50)
+    return vote_proposal(proposal_id=proposal_id, karma_pts=min(100, user_karma))
 
 @router.get("/thermal-leaks")
 def get_subsurface_thermal_leak_telemetry():
@@ -219,9 +224,18 @@ def get_disaster_emergency_telemetry():
     return get_disaster_response_telemetry()
 
 @router.post("/agentic-dispatch")
-def execute_agentic_ai_dispatch(report_text: str = Body("Pothole near college gate", embed=True), area_sqm: float = Body(14.5, embed=True)):
+def execute_agentic_ai_dispatch(
+    report_text: str = Body("Pothole near college gate", embed=True),
+    area_sqm: float = Body(14.5, embed=True),
+    user: Dict[str, Any] = Depends(require_role("Supervisor", "Administrator"))
+):
+    """
+    Bug 14 Fix: Restrict Agentic AI Dispatch to Supervisors and Administrators.
+    """
     from app.services.agentic_llm import run_agentic_dispatch_reasoning
-    return run_agentic_dispatch_reasoning(report_text=report_text, area_sqm=area_sqm)
+    res = run_agentic_dispatch_reasoning(report_text=report_text, area_sqm=area_sqm)
+    res["dispatched_by"] = user.get("email")
+    return res
 
 @router.get("/export-audit-pdf")
 def download_ward_audit_pdf_report(ward_name: str = "Ward 63 (College Road)"):

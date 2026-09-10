@@ -6,6 +6,9 @@ import os
 from pathlib import Path
 from pydantic import BaseModel
 
+from io import BytesIO
+from PIL import Image
+
 from app.models.schemas import (
     Complaint, ComplaintCreate, ComplaintStatus, LocationData
 )
@@ -15,7 +18,7 @@ from app.services.ai_vision import analyze_complaint_image
 from app.services.spatial_cluster import cluster_complaints
 from app.services.geo_intelligence import resolve_geolocation
 from app.services.websocket_manager import notify_complaint_created, notify_status_changed
-from app.routes.auth import get_current_user_email
+from app.routes.auth import get_current_user_email, get_current_user, require_role
 from app.services.audit_logger import log_audit_event
 
 router = APIRouter(prefix="/api/complaints", tags=["Complaints"])
@@ -24,7 +27,10 @@ UPLOAD_DIR = Path(__file__).parent.parent.parent / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 @router.post("/upload-media")
-async def upload_complaint_media(file: UploadFile = File(...)):
+async def upload_complaint_media(file: UploadFile = File(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Bug 15 & Bug 16 Fixes: Requires authenticated user and validates binary image header (magic bytes).
+    """
     allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "video/mp4"]
     if file.content_type not in allowed_types:
         raise HTTPException(
@@ -35,6 +41,14 @@ async def upload_complaint_media(file: UploadFile = File(...)):
     file_bytes = await file.read()
     if len(file_bytes) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File size exceeds maximum limit of 10MB.")
+
+    # Magic-byte header verification for image files
+    if file.content_type.startswith("image/"):
+        try:
+            img = Image.open(BytesIO(file_bytes))
+            img.verify()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Corrupted image binary header or invalid image file content.")
 
     ext = Path(file.filename).suffix or ".jpg"
     filename = f"media-{uuid.uuid4().hex[:10]}{ext}"
@@ -48,7 +62,8 @@ async def upload_complaint_media(file: UploadFile = File(...)):
         "file_url": f"/uploads/{filename}",
         "filename": filename,
         "content_type": file.content_type,
-        "size_bytes": len(file_bytes)
+        "size_bytes": len(file_bytes),
+        "uploaded_by": current_user.get("email")
     }
 
 COMMENTS_STORE: Dict[str, List[Dict[str, Any]]] = {}
@@ -56,16 +71,16 @@ ATTACHMENTS_STORE: Dict[str, List[Dict[str, Any]]] = {}
 
 # Authoritative Lifecycle State Machine Transition Rules
 VALID_TRANSITIONS: Dict[ComplaintStatus, Set[ComplaintStatus]] = {
-    ComplaintStatus.SUBMITTED: {ComplaintStatus.AI_ANALYSIS, ComplaintStatus.VERIFIED, ComplaintStatus.ASSIGNED, ComplaintStatus.REJECTED},
-    ComplaintStatus.AI_ANALYSIS: {ComplaintStatus.VERIFIED, ComplaintStatus.ASSIGNED, ComplaintStatus.REJECTED},
-    ComplaintStatus.VERIFIED: {ComplaintStatus.ASSIGNED, ComplaintStatus.REJECTED},
-    ComplaintStatus.ASSIGNED: {ComplaintStatus.IN_PROGRESS, ComplaintStatus.REJECTED},
+    ComplaintStatus.SUBMITTED: {ComplaintStatus.AI_ANALYSIS, ComplaintStatus.VERIFIED, ComplaintStatus.ASSIGNED, ComplaintStatus.AI_VERIFICATION, ComplaintStatus.REJECTED},
+    ComplaintStatus.AI_ANALYSIS: {ComplaintStatus.VERIFIED, ComplaintStatus.ASSIGNED, ComplaintStatus.AI_VERIFICATION, ComplaintStatus.REJECTED},
+    ComplaintStatus.VERIFIED: {ComplaintStatus.ASSIGNED, ComplaintStatus.AI_VERIFICATION, ComplaintStatus.REJECTED},
+    ComplaintStatus.ASSIGNED: {ComplaintStatus.IN_PROGRESS, ComplaintStatus.AI_VERIFICATION, ComplaintStatus.REJECTED},
     ComplaintStatus.IN_PROGRESS: {ComplaintStatus.AI_VERIFICATION, ComplaintStatus.CITIZEN_CONFIRMATION, ComplaintStatus.RESOLVED, ComplaintStatus.REJECTED},
     ComplaintStatus.AI_VERIFICATION: {ComplaintStatus.CITIZEN_CONFIRMATION, ComplaintStatus.RESOLVED, ComplaintStatus.REJECTED},
     ComplaintStatus.CITIZEN_CONFIRMATION: {ComplaintStatus.CLOSED, ComplaintStatus.REOPENED},
     ComplaintStatus.RESOLVED: {ComplaintStatus.CLOSED, ComplaintStatus.REOPENED},
     ComplaintStatus.CLOSED: {ComplaintStatus.REOPENED},
-    ComplaintStatus.REOPENED: {ComplaintStatus.ASSIGNED, ComplaintStatus.IN_PROGRESS, ComplaintStatus.REJECTED},
+    ComplaintStatus.REOPENED: {ComplaintStatus.ASSIGNED, ComplaintStatus.IN_PROGRESS, ComplaintStatus.AI_VERIFICATION, ComplaintStatus.REJECTED},
     ComplaintStatus.REJECTED: {ComplaintStatus.REOPENED}
 }
 

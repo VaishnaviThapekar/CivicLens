@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body, Depends
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -7,6 +7,9 @@ from app.db.store import db_store
 from app.services.ai_vision import verify_resolution
 from app.models.schemas import ResolutionVerificationResult, ComplaintStatus
 
+from app.routes.complaints import validate_status_transition
+from app.routes.auth import get_current_user
+
 router = APIRouter(prefix="/api/verification", tags=["Resolution Verification"])
 
 class ResolutionEvidenceSubmission(BaseModel):
@@ -14,8 +17,8 @@ class ResolutionEvidenceSubmission(BaseModel):
     officer_id: str = "Officer PWD-42"
     officer_notes: str = ""
     evidence_image_url: str
-    gps_lat: Optional[float] = 19.9975
-    gps_lng: Optional[float] = 73.7898
+    gps_lat: Optional[float] = None
+    gps_lng: Optional[float] = None
     timestamp: Optional[str] = None
 
 class CitizenFeedbackSubmission(BaseModel):
@@ -56,9 +59,14 @@ def verify_officer_resolution(payload: ResolutionEvidenceSubmission):
 
     # Bug 34 Fix: Enforce lifecycle status workflow consistency (AI_VERIFICATION or REJECTED_FAKE_RESOLUTION)
     if verification_res.fake_resolution_detected:
-        complaint.status = ComplaintStatus.REJECTED_FAKE_RESOLUTION
+        target_status = ComplaintStatus.REJECTED_FAKE_RESOLUTION
+    elif verification_res.human_review_triggered:
+        target_status = ComplaintStatus.AI_VERIFICATION
     else:
-        complaint.status = ComplaintStatus.AI_VERIFICATION
+        target_status = ComplaintStatus.AI_VERIFICATION
+
+    validate_status_transition(complaint.status, target_status)
+    complaint.status = target_status
 
     complaint.status_history.append({
         "status": complaint.status.value,
@@ -76,27 +84,35 @@ def verify_resolution_alias(payload: ResolutionEvidenceSubmission):
     return verify_officer_resolution(payload)
 
 @router.post("/citizen-feedback")
-def submit_citizen_feedback(payload: CitizenFeedbackSubmission):
+def submit_citizen_feedback(payload: CitizenFeedbackSubmission, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Bug 21 Fix: Citizen feedback enforces state machine transition rules and logs authenticated actor.
+    """
     complaint = db_store.get_complaint_by_id(payload.complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint ID not found")
 
     if payload.feedback == "YES_FIXED":
-        complaint.status = ComplaintStatus.CLOSED
+        target_status = ComplaintStatus.CLOSED
         msg = "✓ Incident confirmed resolved and closed."
     elif payload.feedback == "NO_STILL_EXISTS":
-        complaint.status = ComplaintStatus.REOPENED
+        target_status = ComplaintStatus.REOPENED
         msg = "⚠️ Citizen marked issue unresolved. Ticket automatically reopened and escalated to supervisor."
     else:
-        complaint.status = ComplaintStatus.IN_PROGRESS
+        target_status = ComplaintStatus.IN_PROGRESS
         msg = "⚠️ Issue marked partially fixed. Sent back for field contractor inspection."
 
+    # Enforce lifecycle state machine rules
+    validate_status_transition(complaint.status, target_status)
+
+    complaint.status = target_status
     now_iso = datetime.now().isoformat()
     complaint.updated_at = now_iso
+    actor_name = current_user.get("full_name") or current_user.get("email") or "Citizen"
     complaint.status_history.append({
         "status": complaint.status.value,
         "timestamp": now_iso,
-        "actor": "Citizen Feedback",
+        "actor": f"Citizen ({actor_name})",
         "notes": msg
     })
 
@@ -105,7 +121,8 @@ def submit_citizen_feedback(payload: CitizenFeedbackSubmission):
     return {
         "complaint_id": payload.complaint_id,
         "new_status": complaint.status.value,
-        "message": msg
+        "message": msg,
+        "confirmed_by": actor_name
     }
 
 @router.get("/{complaint_id}/timeline")

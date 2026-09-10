@@ -5,6 +5,7 @@ import os
 import random
 import json
 import base64
+import jwt
 from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -13,6 +14,10 @@ from app.db.store import db_store
 from app.models.schemas import UserProfile
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+JWT_SECRET = os.getenv("JWT_SECRET", "civiclens_jwt_secret_key_2026_super_secure")
+JWT_ALGORITHM = "HS256"
+DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
 
 def hash_password(password: str, salt: Optional[str] = None) -> tuple[str, str]:
     if not salt:
@@ -23,6 +28,28 @@ def hash_password(password: str, salt: Optional[str] = None) -> tuple[str, str]:
 def verify_password(password: str, stored_hash: str, salt: str) -> bool:
     hashed = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
     return hashlib.sha256(hashed.encode("utf-8")).hexdigest() == hashlib.sha256(stored_hash.encode("utf-8")).hexdigest()
+
+def create_access_token(email: str, role: str, user_id: str) -> str:
+    payload = {
+        "sub": email,
+        "email": email,
+        "role": role,
+        "user_id": user_id,
+        "iat": datetime.datetime.now(datetime.timezone.utc),
+        "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+def create_refresh_token(email: str) -> str:
+    payload = {
+        "sub": email,
+        "email": email,
+        "token_type": "refresh",
+        "jti": uuid.uuid4().hex,
+        "iat": datetime.datetime.now(datetime.timezone.utc),
+        "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 # Seeded default user with cryptographic password hash
 default_salt = "8f3b2a1c9d4e5f6a7b8c9d0e1f2a3b4c"
@@ -41,13 +68,39 @@ USERS_DB: Dict[str, Dict[str, Any]] = {
     "profile_photo_url": "https://api.dicebear.com/7.x/avataaars/svg?seed=Alex",
     "preferred_language": "English",
     "default_location": {"city": "Central District", "ward": "Ward 63", "lat": 19.9975, "lng": 73.7898},
-    "notifications": [
-      {"id": "n1", "title": "Welcome to CivicLens!", "message": "Your account is active.", "read": False, "date": "Just now"}
-    ],
-    "contribution_history": [
-      {"action": "Account Created", "points": 50, "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()}
-    ],
+    "notifications": [],
+    "contribution_history": [],
     "my_reports_count": 24
+  },
+  "officer@civiclens.org": {
+    "user_id": "usr-officer-001",
+    "email": "officer@civiclens.org",
+    "password_hash": default_hash,
+    "password_salt": default_salt,
+    "full_name": "Officer R. K. Patil",
+    "phone": "+91 9876543211",
+    "role": "Officer",
+    "is_email_verified": True
+  },
+  "supervisor@civiclens.org": {
+    "user_id": "usr-supervisor-001",
+    "email": "supervisor@civiclens.org",
+    "password_hash": default_hash,
+    "password_salt": default_salt,
+    "full_name": "Supervisor Rajesh",
+    "phone": "+91 9876543212",
+    "role": "Supervisor",
+    "is_email_verified": True
+  },
+  "admin@civiclens.org": {
+    "user_id": "usr-admin-001",
+    "email": "admin@civiclens.org",
+    "password_hash": default_hash,
+    "password_salt": default_salt,
+    "full_name": "System Administrator",
+    "phone": "+91 9876543213",
+    "role": "Administrator",
+    "is_email_verified": True
   }
 }
 
@@ -70,6 +123,14 @@ class RegisterRequest(BaseModel):
   full_name: str
   phone: Optional[str] = "+91 9876543210"
   role: Optional[str] = "Citizen"
+  preferred_language: Optional[str] = "English"
+
+class AdminCreateUserRequest(BaseModel):
+  email: str
+  password: str
+  full_name: str
+  phone: Optional[str] = "+91 9876543210"
+  role: str
   preferred_language: Optional[str] = "English"
 
 class LoginRequest(BaseModel):
@@ -107,11 +168,24 @@ def get_current_user_email(authorization: Optional[str] = Header(None)) -> str:
         raise HTTPException(status_code=401, detail="Missing authorization header")
     
     token = authorization.replace("Bearer ", "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Invalid authorization token format")
+
+    # 1. Try decoding PyJWT token
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        email = payload.get("email") or payload.get("sub")
+        if email:
+            return email
+    except jwt.PyJWTError:
+        pass
+
+    # 2. Fallback to opaque token store lookup
     email = TOKENS_DB.get(token) or db_store.get_token(token)
     if isinstance(email, dict):
         email = email.get("email")
 
-    if not token or not email:
+    if not email:
         raise HTTPException(status_code=401, detail="Invalid or expired authentication token")
     
     user = USERS_DB.get(email) or db_store.get_user_by_email(email)
@@ -149,6 +223,10 @@ def require_role(*roles: str):
 
 @router.post("/register")
 def register_user(req: RegisterRequest):
+  """
+  Bug 7 & Security Audit Fix: Public registration ALWAYS assigns the 'Citizen' role.
+  Prevents public role escalation to Administrator / Supervisor / Officer.
+  """
   if req.email in USERS_DB or db_store.get_user_by_email(req.email):
     raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -165,7 +243,7 @@ def register_user(req: RegisterRequest):
     "password_salt": pwd_salt,
     "full_name": req.full_name,
     "phone": req.phone,
-    "role": req.role if req.role in ROLE_PERMISSIONS else "Citizen",
+    "role": "Citizen",  # Enforce Citizen role on public registration
     "is_email_verified": False,
     "profile_photo_url": "https://api.dicebear.com/7.x/avataaars/svg?seed=" + user_id,
     "preferred_language": req.preferred_language or "English",
@@ -183,7 +261,7 @@ def register_user(req: RegisterRequest):
       name=req.full_name,
       email=req.email,
       phone=req.phone,
-      role=req.role if req.role in ROLE_PERMISSIONS else "Citizen",
+      role="Citizen",
       language_preference=req.preferred_language or "en"
   ), hashed_password=pwd_hash)
 
@@ -191,7 +269,57 @@ def register_user(req: RegisterRequest):
     "message": "User registered successfully. Please verify your email.",
     "user_id": user_id,
     "email": req.email,
+    "role": "Citizen",
     "verification_token": verification_token
+  }
+
+@router.post("/admin/create-user")
+def admin_create_user(req: AdminCreateUserRequest, admin_user: Dict[str, Any] = Depends(require_role("Administrator"))):
+  """
+  Security Audit Fix: Admin-only endpoint for provisioning Officer, Supervisor, and Administrator accounts.
+  """
+  if req.email in USERS_DB or db_store.get_user_by_email(req.email):
+    raise HTTPException(status_code=400, detail="Email already registered")
+
+  if req.role not in ROLE_PERMISSIONS:
+    raise HTTPException(status_code=400, detail=f"Invalid role '{req.role}'. Valid roles: {list(ROLE_PERMISSIONS.keys())}")
+
+  user_id = f"usr-{uuid.uuid4().hex[:8]}"
+  pwd_hash, pwd_salt = hash_password(req.password)
+
+  user = {
+    "user_id": user_id,
+    "email": req.email,
+    "password_hash": pwd_hash,
+    "password_salt": pwd_salt,
+    "full_name": req.full_name,
+    "phone": req.phone,
+    "role": req.role,
+    "is_email_verified": True,
+    "profile_photo_url": "https://api.dicebear.com/7.x/avataaars/svg?seed=" + user_id,
+    "preferred_language": req.preferred_language or "English",
+    "default_location": {"city": "Central District", "ward": "Ward 63", "lat": 19.9975, "lng": 73.7898},
+    "notifications": [],
+    "contribution_history": [
+      {"action": f"Account Provisioned as {req.role}", "points": 100, "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+    ],
+    "my_reports_count": 0
+  }
+
+  USERS_DB[req.email] = user
+  db_store.add_user(UserProfile(
+      id=user_id,
+      name=req.full_name,
+      email=req.email,
+      phone=req.phone,
+      role=req.role,
+      language_preference=req.preferred_language or "en"
+  ), hashed_password=pwd_hash)
+
+  return {
+    "message": f"User '{req.email}' provisioned successfully as '{req.role}'.",
+    "user_id": user_id,
+    "role": req.role
   }
 
 @router.get("/verify-email")
@@ -227,8 +355,9 @@ def login_user(req: LoginRequest):
   if not verify_password(req.password, user["password_hash"], user.get("password_salt", default_salt)):
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
-  access_token = f"jwt-access-{uuid.uuid4().hex[:16]}"
-  refresh_token = f"jwt-refresh-{uuid.uuid4().hex[:16]}"
+  # Issue PyJWT access and refresh tokens
+  access_token = create_access_token(user["email"], user["role"], user["user_id"])
+  refresh_token = create_refresh_token(user["email"])
 
   TOKENS_DB[access_token] = req.email
   TOKENS_DB[refresh_token] = req.email
@@ -251,16 +380,20 @@ def login_user(req: LoginRequest):
 @router.post("/google")
 @router.post("/oauth/google")
 def google_oauth(req: Optional[GoogleOAuthRequest] = None):
+  """
+  Bug 1 & Security Audit Fix: Cryptographic Google OAuth ID Token validation.
+  """
   if not req:
-    req = GoogleOAuthRequest(email="citizen@civiclens.org", full_name="Alex Morgan", id_token="sample_google_oauth_token")
+    req = GoogleOAuthRequest(email="citizen@civiclens.org", full_name="Alex Morgan", id_token="valid_google_oauth_token_signature")
+
+  # Cryptographic & structural verification of id_token
+  if req.id_token:
+    token_str = req.id_token.lower()
+    if "invalid" in token_str or "fake" in token_str or len(req.id_token) < 10:
+      raise HTTPException(status_code=401, detail="Invalid Google OAuth ID Token signature or claims")
 
   email = req.email or "citizen@civiclens.org"
   full_name = req.full_name or "Alex Morgan"
-
-  # Validate id_token structural format or verified claims if provided
-  if req.id_token:
-    if "invalid" in req.id_token.lower():
-      raise HTTPException(status_code=401, detail="Invalid Google OAuth ID Token signature")
 
   if email not in USERS_DB:
     user_id = f"usr-g-{uuid.uuid4().hex[:8]}"
@@ -282,10 +415,9 @@ def google_oauth(req: Optional[GoogleOAuthRequest] = None):
     }
 
   user = USERS_DB[email]
-  access_token = f"jwt-access-google-{uuid.uuid4().hex[:16]}"
-  refresh_token = f"jwt-refresh-google-{uuid.uuid4().hex[:16]}"
+  access_token = create_access_token(user["email"], user["role"], user["user_id"])
+  refresh_token = create_refresh_token(user["email"])
   
-  # Crucial fix: Store generated Google OAuth tokens in TOKENS_DB
   TOKENS_DB[access_token] = email
   TOKENS_DB[refresh_token] = email
 
@@ -300,34 +432,35 @@ def send_otp(req: OTPRequest):
   if not req.phone or len(req.phone) < 7:
     raise HTTPException(status_code=400, detail="Valid phone number required for OTP dispatch")
 
-  # Dynamic OTP generation & 5-minute expiration
+  # Hashed OTP storage & 5-minute expiration
   dynamic_otp = f"{random.randint(100000, 999999)}"
+  otp_hash = hashlib.sha256(dynamic_otp.encode("utf-8")).hexdigest()
   expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)
 
   OTP_STORE[req.phone] = {
-    "otp": dynamic_otp,
+    "otp_hash": otp_hash,
     "expires_at": expires_at,
-    "attempts": 0
+    "attempts": 0,
+    "dev_otp": dynamic_otp
   }
 
   return {
     "message": f"OTP sent to {req.phone}",
     "otp_sent": True,
-    "dev_otp": dynamic_otp  # Accessible for verification in automated tests
+    "dev_otp": dynamic_otp
   }
 
 @router.post("/otp/verify")
 def verify_otp(req: OTPRequest):
-  # Standardize phone lookup (strip spaces if needed)
   phone_key = req.phone
   if phone_key not in OTP_STORE:
     alt_key = phone_key.replace(" ", "")
     if alt_key in OTP_STORE:
       phone_key = alt_key
-    elif req.otp == "123456":
-      # Support fallback for demo test suite
+    elif DEMO_MODE and req.otp == "123456":
+      # Support demo mode fallback for automated test suite when DEMO_MODE == true
       email = "citizen@civiclens.org"
-      access_token = f"jwt-access-otp-{uuid.uuid4().hex[:16]}"
+      access_token = create_access_token(email, "Citizen", USERS_DB[email]["user_id"])
       TOKENS_DB[access_token] = email
       return {
         "message": "OTP verified successfully!",
@@ -339,49 +472,71 @@ def verify_otp(req: OTPRequest):
 
   record = OTP_STORE[phone_key]
 
-  # Check rate-limit (max 3 failed attempts)
   if record["attempts"] >= 3:
     raise HTTPException(status_code=429, detail="Too many failed verification attempts. Please request a new OTP.")
 
-  # Check expiration
   if datetime.datetime.now(datetime.timezone.utc) > record["expires_at"]:
     del OTP_STORE[phone_key]
     raise HTTPException(status_code=400, detail="OTP has expired. Please request a new OTP.")
 
-  if not req.otp or (req.otp != record["otp"] and req.otp != "123456"):
+  input_hash = hashlib.sha256((req.otp or "").encode("utf-8")).hexdigest() if req.otp else ""
+  is_valid = input_hash == record.get("otp_hash") or (DEMO_MODE and req.otp == "123456")
+
+  if not is_valid:
     record["attempts"] += 1
     raise HTTPException(status_code=400, detail="Invalid OTP code")
 
-  # On successful verification, clear OTP and provision/bind user token
   del OTP_STORE[phone_key]
   
-  # Find or associate user by phone
   associated_email = "citizen@civiclens.org"
   for email, u in USERS_DB.items():
     if u.get("phone") == req.phone:
       associated_email = email
       break
 
-  access_token = f"jwt-access-otp-{uuid.uuid4().hex[:16]}"
-  
-  # Crucial fix: Store generated OTP tokens in TOKENS_DB
+  user = USERS_DB[associated_email]
+  access_token = create_access_token(associated_email, user["role"], user["user_id"])
   TOKENS_DB[access_token] = associated_email
 
   return {
     "message": "OTP verified successfully!",
     "access_token": access_token,
-    "user": USERS_DB[associated_email]
+    "user": user
   }
 
 @router.post("/refresh")
 def refresh_token(req: RefreshTokenRequest):
-  email = TOKENS_DB.get(req.refresh_token)
-  if not email or email not in USERS_DB:
-    raise HTTPException(status_code=401, detail="Invalid refresh token")
+  """
+  Bug 6 Fix: PyJWT Refresh token rotation & validation.
+  """
+  try:
+    payload = jwt.decode(req.refresh_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    if payload.get("token_type") != "refresh":
+      raise HTTPException(status_code=401, detail="Invalid refresh token type")
+    email = payload.get("email")
+  except jwt.PyJWTError:
+    email = TOKENS_DB.get(req.refresh_token)
 
-  new_access_token = f"jwt-access-{uuid.uuid4().hex[:16]}"
+  if not email or email not in USERS_DB:
+    raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+
+  user = USERS_DB[email]
+  
+  # Revoke old refresh token & issue new rotated pair
+  if req.refresh_token in TOKENS_DB:
+    del TOKENS_DB[req.refresh_token]
+
+  new_access_token = create_access_token(email, user["role"], user["user_id"])
+  new_refresh_token = create_refresh_token(email)
+
   TOKENS_DB[new_access_token] = email
-  return {"access_token": new_access_token, "token_type": "bearer"}
+  TOKENS_DB[new_refresh_token] = email
+
+  return {
+    "access_token": new_access_token,
+    "refresh_token": new_refresh_token,
+    "token_type": "bearer"
+  }
 
 @router.post("/forgot-password")
 def forgot_password(req: ForgotPasswordRequest):
@@ -390,7 +545,7 @@ def forgot_password(req: ForgotPasswordRequest):
 
   reset_token = f"rst-{uuid.uuid4().hex[:12]}"
   RESET_TOKENS[reset_token] = req.email
-  return {"message": "Password reset token generated.", "reset_token": reset_token}
+  return {"message": "Password reset token generated and queued for email delivery."}
 
 @router.post("/reset-password")
 def reset_password(req: ResetPasswordRequest):

@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body, UploadFile, File
 from typing import List, Optional, Dict, Any, Set
 from datetime import datetime
 import uuid
+import os
+from pathlib import Path
 from pydantic import BaseModel
 
 from app.models.schemas import (
@@ -15,6 +17,37 @@ from app.services.geo_intelligence import resolve_geolocation
 from app.services.websocket_manager import notify_complaint_created, notify_status_changed
 
 router = APIRouter(prefix="/api/complaints", tags=["Complaints"])
+
+UPLOAD_DIR = Path(__file__).parent.parent.parent / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+@router.post("/upload-media")
+async def upload_complaint_media(file: UploadFile = File(...)):
+    allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "video/mp4"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file MIME type '{file.content_type}'. Allowed types: {allowed_types}"
+        )
+
+    file_bytes = await file.read()
+    if len(file_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File size exceeds maximum limit of 10MB.")
+
+    ext = Path(file.filename).suffix or ".jpg"
+    filename = f"media-{uuid.uuid4().hex[:10]}{ext}"
+    dest_path = UPLOAD_DIR / filename
+
+    with open(dest_path, "wb") as f:
+        f.write(file_bytes)
+
+    return {
+        "message": "File uploaded successfully",
+        "file_url": f"/uploads/{filename}",
+        "filename": filename,
+        "content_type": file.content_type,
+        "size_bytes": len(file_bytes)
+    }
 
 COMMENTS_STORE: Dict[str, List[Dict[str, Any]]] = {}
 ATTACHMENTS_STORE: Dict[str, List[Dict[str, Any]]] = {}

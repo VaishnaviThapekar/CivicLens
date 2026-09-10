@@ -120,6 +120,33 @@ def get_current_user_email(authorization: Optional[str] = Header(None)) -> str:
         
     return email
 
+def get_current_user(email: str = Depends(get_current_user_email)) -> Dict[str, Any]:
+    user = USERS_DB.get(email)
+    if not user:
+        db_u = db_store.get_user_by_email(email)
+        if db_u:
+            user = {
+                "user_id": db_u.id,
+                "email": db_u.email,
+                "password_hash": db_store.get_user_password(email) or default_hash,
+                "password_salt": default_salt,
+                "full_name": db_u.name,
+                "phone": db_u.phone,
+                "role": db_u.role.value if hasattr(db_u.role, "value") else str(db_u.role)
+            }
+            USERS_DB[email] = user
+    if not user:
+        raise HTTPException(status_code=401, detail="User account associated with token not found")
+    return user
+
+def require_role(*roles: str):
+    def role_checker(user: Dict[str, Any] = Depends(get_current_user)):
+        user_role = user.get("role")
+        if user_role not in roles and user_role != "Administrator":
+            raise HTTPException(status_code=403, detail=f"User role '{user_role}' does not have required permissions: {list(roles)}")
+        return user
+    return role_checker
+
 @router.post("/register")
 def register_user(req: RegisterRequest):
   if req.email in USERS_DB or db_store.get_user_by_email(req.email):

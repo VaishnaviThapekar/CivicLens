@@ -1,16 +1,25 @@
 """
 CivicLens Computer Vision & AI Classification Service
 Detects defect categories, subcategories, bounding box areas in m², AI confidence scores, and low-confidence human review triggers.
-Features: Hybrid Computer Vision & Image Feature Classifier, Perceptual SSIM Hashing, Haversine GPS Distance & Freshness Verification.
+Features: Hybrid Computer Vision & Image Feature Classifier, Pixel SSIM & Perceptual Hashing, Haversine GPS Distance & Freshness Verification.
 """
 
 import hashlib
 import math
+import os
+import base64
+from io import BytesIO
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+from pathlib import Path
+
+from PIL import Image
+import numpy as np
 
 from app.models.schemas import AIDetectionDetails, ResolutionVerificationResult
 from app.services.duplicate_detector import calculate_haversine_distance_meters
+
+UPLOAD_DIR = Path(__file__).parent.parent.parent / "uploads"
 
 SUBCATEGORY_TREE = {
   "Road Infrastructure": ["Pothole", "Road crack", "Damaged surface", "Road obstruction"],
@@ -21,8 +30,48 @@ SUBCATEGORY_TREE = {
   "Traffic & Road Safety": ["Traffic signal failure", "Illegal parking", "Obstruction on road", "Accident bottleneck"]
 }
 
+def load_image_as_array(image_input: Optional[str]) -> Optional[np.ndarray]:
+    """Attempts to load an image input (file path, relative /uploads path, or base64) into a NumPy RGB array."""
+    if not image_input:
+        return None
+    try:
+        raw = str(image_input).strip()
+        img_path = None
+        if raw.startswith("/uploads/"):
+            fname = raw.replace("/uploads/", "")
+            img_path = UPLOAD_DIR / fname
+        elif os.path.exists(raw):
+            img_path = Path(raw)
+        
+        if img_path and img_path.exists() and img_path.is_file():
+            img = Image.open(img_path).convert("RGB")
+            return np.array(img)
+            
+        if raw.startswith("data:image/") or (len(raw) > 100 and not raw.startswith("http")):
+            b64_data = raw.split(",")[-1] if "," in raw else raw
+            decoded = base64.b64decode(b64_data)
+            img = Image.open(BytesIO(decoded)).convert("RGB")
+            return np.array(img)
+    except Exception:
+        pass
+    return None
+
 def extract_image_features(image_input: str) -> Dict[str, Any]:
-    """Extract byte/string visual feature hash, aspect ratio, and structural complexity."""
+    """Extract visual feature metrics including pixel variance, gradient density, and hash."""
+    img_arr = load_image_as_array(image_input)
+    if img_arr is not None:
+        gray = 0.299 * img_arr[:, :, 0] + 0.587 * img_arr[:, :, 1] + 0.114 * img_arr[:, :, 2]
+        var = float(np.var(gray))
+        dx = np.diff(gray, axis=1)
+        dy = np.diff(gray, axis=0)
+        grad_density = float(np.mean(np.abs(dx[:-1, :]) + np.abs(dy[:, :-1])))
+        return {
+            "image_hash": hashlib.md5(img_arr.tobytes()).hexdigest()[:12],
+            "pixel_variance": round(var, 2),
+            "edge_gradient_density": round(grad_density, 2),
+            "analysis_type": "Pixel-Based Computer Vision & Spatial Gradient Inspector"
+        }
+
     raw_str = str(image_input)
     hash_obj = hashlib.md5(raw_str.encode('utf-8')).hexdigest()
     byte_len = len(raw_str)
@@ -39,6 +88,7 @@ def analyze_image(image_input: Optional[str], user_description: str = "") -> Opt
     if not image_input and not user_description:
         return None
 
+    img_arr = load_image_as_array(image_input)
     img_features = extract_image_features(image_input) if image_input else None
     desc_lower = (user_description + " " + str(image_input or "")).lower()
 
@@ -68,24 +118,54 @@ def analyze_image(image_input: Optional[str], user_description: str = "") -> Opt
         visual_summary = "General surface anomaly"
         risk_level = "LOW"
 
+    # Default dimensions & area
+    est_dim = "1.8m × 0.9m"
+    est_area = 1.8
+    bboxes = [{"x": 100, "y": 80, "width": 200, "height": 150}]
+
+    if img_arr is not None:
+        try:
+            h, w, _ = img_arr.shape
+            gray = 0.299 * img_arr[:, :, 0] + 0.587 * img_arr[:, :, 1] + 0.114 * img_arr[:, :, 2]
+            dx = np.diff(gray, axis=1)
+            dy = np.diff(gray, axis=0)
+            grad_mag = np.abs(dx[:-1, :]) + np.abs(dy[:, :-1])
+            thresh = np.mean(grad_mag) + np.std(grad_mag)
+            defect_mask = grad_mag > thresh
+            
+            y_indices, x_indices = np.where(defect_mask)
+            if len(y_indices) > 0 and len(x_indices) > 0:
+                ymin, ymax = int(np.min(y_indices)), int(np.max(y_indices))
+                xmin, xmax = int(np.min(x_indices)), int(np.max(x_indices))
+                box_w = max(10, xmax - xmin)
+                box_h = max(10, ymax - ymin)
+                bboxes = [{"x": xmin, "y": ymin, "width": box_w, "height": box_h}]
+                
+                area_ratio = (box_w * box_h) / float(w * h)
+                est_area = round(max(0.5, area_ratio * 10.0), 2)
+                est_dim = f"{round(box_w / float(w) * 3.0, 1)}m × {round(box_h / float(h) * 2.0, 1)}m"
+        except Exception:
+            pass
+
     if img_features:
         visual_summary += f" [Feature Hash: {img_features['image_hash']}]"
 
     return AIDetectionDetails(
         object_detected=object_detected,
         confidence=confidence,
-        estimated_dimensions="1.8m × 0.9m",
-        estimated_area_m2=1.8,
+        estimated_dimensions=est_dim,
+        estimated_area_m2=est_area,
         road_obstruction="Partial Lane Obstruction",
         risk_level=risk_level,
         visual_summary=visual_summary,
-        detected_bboxes=[{"x": 100, "y": 80, "width": 200, "height": 150}],
-        analysis_type="Hybrid Computer Vision & Image Feature Classifier"
+        detected_bboxes=bboxes,
+        analysis_type=img_features.get("analysis_type", "Hybrid Computer Vision & Image Feature Classifier") if img_features else "Hybrid Computer Vision & Image Feature Classifier"
     )
 
 analyze_complaint_image = analyze_image
 
 def calculate_image_ssim(img1: str, img2: str) -> float:
+    """Calculates Structural Similarity Index (SSIM) between two images using PIL & NumPy pixel arrays."""
     if not img1 or not img2:
         return 0.0
     str1, str2 = str(img1).lower(), str(img2).lower()
@@ -94,7 +174,34 @@ def calculate_image_ssim(img1: str, img2: str) -> float:
     if "fake" in str2 or "unrelated" in str2 or "fake" in str1 or "unrelated" in str1:
         return 0.32
 
-    # Perceptual hash & byte feature similarity metric
+    # Attempt pixel-based SSIM computation
+    arr1 = load_image_as_array(img1)
+    arr2 = load_image_as_array(img2)
+
+    if arr1 is not None and arr2 is not None:
+        try:
+            pil1 = Image.fromarray(arr1).resize((256, 256)).convert("L")
+            pil2 = Image.fromarray(arr2).resize((256, 256)).convert("L")
+            
+            g1 = np.array(pil1, dtype=np.float64)
+            g2 = np.array(pil2, dtype=np.float64)
+            
+            mu1 = np.mean(g1)
+            mu2 = np.mean(g2)
+            
+            var1 = np.var(g1)
+            var2 = np.var(g2)
+            cov12 = np.mean((g1 - mu1) * (g2 - mu2))
+            
+            c1 = (0.01 * 255.0) ** 2
+            c2 = (0.03 * 255.0) ** 2
+            
+            ssim_val = ((2.0 * mu1 * mu2 + c1) * (2.0 * cov12 + c2)) / ((mu1 ** 2 + mu2 ** 2 + c1) * (var1 + var2 + c2))
+            return max(0.0, min(1.0, float(ssim_val)))
+        except Exception:
+            pass
+
+    # Perceptual hash & byte feature similarity metric fallback
     h1 = hashlib.md5(str1.encode('utf-8')).hexdigest()
     h2 = hashlib.md5(str2.encode('utf-8')).hexdigest()
     
@@ -178,7 +285,7 @@ def verify_resolution(
             message=f"⚠️ Verification Failed — Human Review Triggered ({', '.join(reasons)})"
         )
 
-    # Genuine Repair — Bug 18 Fix: Set citizen_confirmation to "PENDING_CITIZEN_REVIEW"
+    # Genuine Repair — Set citizen_confirmation to "PENDING_CITIZEN_REVIEW"
     return ResolutionVerificationResult(
         complaint_id=str(complaint_id_or_img),
         claimed_resolution=True,

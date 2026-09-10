@@ -114,6 +114,19 @@ def submit_citizen_feedback(payload: CitizenFeedbackSubmission, current_user: Di
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint ID not found")
 
+    user_role = current_user.get("role")
+    user_email = current_user.get("email")
+    user_id = current_user.get("user_id")
+
+    if user_role not in ["Supervisor", "Administrator"]:
+        if (getattr(complaint, "submitted_by_email", None) != user_email and
+            getattr(complaint, "submitted_by", None) != user_email and
+            (not user_id or getattr(complaint, "submitted_by_user_id", None) != user_id)):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the complaint author or a Supervisor/Admin can submit citizen feedback for this issue."
+            )
+
     if payload.feedback == "YES_FIXED":
         target_status = ComplaintStatus.CLOSED
         msg = "✓ Incident confirmed resolved and closed."

@@ -29,6 +29,7 @@ def create_sample_complaint(comp_id: str, ward: str = "Ward 63", status: Complai
         priority_reason="Test priority",
         status=status,
         location=LocationData(lat=19.9975, lng=73.7898, ward=ward),
+        image_url="https://example.com/before.jpg",
         created_at=c_time,
         updated_at=u_time,
         status_history=[{

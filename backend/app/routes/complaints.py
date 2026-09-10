@@ -199,7 +199,10 @@ def create_complaint(payload: ComplaintCreate, current_user: Dict[str, Any] = De
     return new_complaint
 
 @router.post("/whatsapp-simulate")
-def simulate_whatsapp_bot_message(req: WhatsAppSimulateRequest):
+def simulate_whatsapp_bot_message(
+    req: WhatsAppSimulateRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     return process_incoming_whatsapp_message(
         sender_phone=req.sender_phone,
         message_text=req.message_text,
@@ -223,17 +226,29 @@ def get_my_complaints(
         or (u_id and getattr(c, "submitted_by_user_id", None) == u_id)
     ]
 
-@router.get("", response_model=List[Complaint])
+@router.get("")
 def get_complaints(
     ward: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100)
+    page_size: int = Query(20, ge=1, le=100),
+    authorization: Optional[str] = Header(None)
 ):
     """
-    Bug 43 Fix: Paginated complaint list query endpoint.
+    Data Privacy & Sanitization: Returns sanitized public representations for unauthenticated callers;
+    full complaint payloads for authenticated authority.
     """
+    is_authorized = False
+    if authorization:
+        try:
+            email = get_current_user_email(authorization)
+            user = get_current_user(email)
+            if user.get("role") in ["Officer", "Supervisor", "Administrator"]:
+                is_authorized = True
+        except Exception:
+            pass
+
     complaints = db_store.get_all_complaints()
     if ward:
         complaints = [c for c in complaints if c.location.ward.lower() == ward.lower()]
@@ -243,7 +258,32 @@ def get_complaints(
         complaints = [c for c in complaints if c.category.value.lower() == category.lower()]
     
     start_idx = (page - 1) * page_size
-    return complaints[start_idx : start_idx + page_size]
+    paged = complaints[start_idx : start_idx + page_size]
+
+    if is_authorized:
+        return paged
+
+    return [
+        {
+            "id": c.id,
+            "tracking_number": c.tracking_number,
+            "title": c.title,
+            "category": c.category.value if hasattr(c.category, "value") else str(c.category),
+            "ward": c.location.ward if c.location else None,
+            "location": {
+                "city": c.location.city,
+                "ward": c.location.ward,
+                "lat": c.location.lat,
+                "lng": c.location.lng
+            } if c.location else None,
+            "status": c.status.value if hasattr(c.status, "value") else str(c.status),
+            "priority": c.priority.value if hasattr(c.priority, "value") else str(c.priority),
+            "created_at": c.created_at,
+            "image_url": c.image_url,
+            "is_public_view": True
+        }
+        for c in paged
+    ]
 
 @router.get("/{complaint_id}")
 def get_complaint_detail(complaint_id: str, authorization: Optional[str] = Header(None)):
@@ -301,6 +341,18 @@ def update_complaint_status(
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
 
+    user_role = current_user.get("role")
+    user_email = current_user.get("email")
+    user_id = current_user.get("user_id")
+
+    if user_role == "Officer":
+        assigned_to = complaint.officer_assigned
+        if assigned_to and assigned_to not in [user_email, user_id, current_user.get("full_name")]:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Officer '{user_email}' is not authorized to update status for a complaint assigned to '{assigned_to}'"
+            )
+
     status_map = {
         "submitted": ComplaintStatus.SUBMITTED,
         "ai_analysis": ComplaintStatus.AI_ANALYSIS,
@@ -349,6 +401,19 @@ def reopen_complaint(
     complaint = db_store.get_complaint_by_id(complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
+
+    user_role = current_user.get("role")
+    user_email = current_user.get("email")
+    user_id = current_user.get("user_id")
+
+    if user_role not in ["Supervisor", "Administrator"]:
+        if (getattr(complaint, "submitted_by_email", None) != user_email and
+            getattr(complaint, "submitted_by", None) != user_email and
+            (not user_id or getattr(complaint, "submitted_by_user_id", None) != user_id)):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the complaint author or a Supervisor/Admin can reopen this ticket."
+            )
 
     validate_status_transition(complaint.status, ComplaintStatus.REOPENED)
 
@@ -459,9 +524,29 @@ def get_attachments(complaint_id: str):
     return {"attachments": db_store.get_attachments(complaint_id)}
 
 @router.post("/{complaint_id}/citizen-confirm")
-def confirm_resolution(complaint_id: str, action: str = Query(..., pattern="^(CONFIRMED|DISPUTED)$")):
+def confirm_resolution(
+    complaint_id: str,
+    action: str = Query(..., pattern="^(CONFIRMED|DISPUTED)$"),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     complaint = db_store.get_complaint_by_id(complaint_id)
-    if not complaint or not complaint.verification_result:
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+
+    user_role = current_user.get("role")
+    user_email = current_user.get("email")
+    user_id = current_user.get("user_id")
+
+    if user_role not in ["Supervisor", "Administrator"]:
+        if (getattr(complaint, "submitted_by_email", None) != user_email and
+            getattr(complaint, "submitted_by", None) != user_email and
+            (not user_id or getattr(complaint, "submitted_by_user_id", None) != user_id)):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the complaint author or a Supervisor/Admin can confirm resolution of this ticket."
+            )
+
+    if not complaint.verification_result:
         raise HTTPException(status_code=400, detail="No resolution verification record found for this complaint.")
 
     complaint.verification_result.citizen_confirmation = action

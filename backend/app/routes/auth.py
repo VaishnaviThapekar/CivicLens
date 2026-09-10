@@ -13,11 +13,19 @@ from app.services.notification_engine import get_user_notifications, send_notifi
 from app.db.store import db_store
 from app.models.schemas import UserProfile
 
+import secrets
+
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-JWT_SECRET = os.getenv("JWT_SECRET", "civiclens_jwt_secret_key_2026_super_secure")
-JWT_ALGORITHM = "HS256"
 DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
+JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET:
+    if DEMO_MODE:
+        JWT_SECRET = "civiclens_jwt_secret_key_2026_super_secure"
+    else:
+        JWT_SECRET = secrets.token_hex(32)
+
+JWT_ALGORITHM = "HS256"
 
 def hash_password(password: str, salt: Optional[str] = None) -> tuple[str, str]:
     if not salt:
@@ -386,17 +394,34 @@ def verify_google_id_token(id_token: str, req_email: Optional[str] = None, req_n
     if "invalid" in token_str or "fake" in token_str or len(id_token) < 10:
         raise HTTPException(status_code=401, detail="Invalid Google OAuth ID Token signature or claims")
 
+    # In production (or when token looks like an OIDC JWT), attempt live Google tokeninfo verification
+    if not DEMO_MODE or len(id_token) > 100 or id_token.count(".") == 2:
+        try:
+            import urllib.request
+            import json
+            url = f"https://oauth2.googleapis.com/tokeninfo?id_token={id_token}"
+            req = urllib.request.Request(url, headers={"User-Agent": "CivicLens-Auth/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if resp.status == 200:
+                    info = json.loads(resp.read().decode("utf-8"))
+                    if info.get("iss") not in ["accounts.google.com", "https://accounts.google.com"]:
+                        raise HTTPException(status_code=401, detail="Invalid Google OAuth ID Token issuer")
+                    if info.get("email_verified") not in [True, "true"]:
+                        raise HTTPException(status_code=401, detail="Google OAuth account email is unverified")
+                    return info
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
     try:
         payload = jwt.decode(id_token, options={"verify_signature": False})
         iss = payload.get("iss", "")
-        if iss not in ["accounts.google.com", "https://accounts.google.com"]:
-            raise HTTPException(status_code=401, detail="Invalid Google OAuth ID Token issuer")
-        
-        exp = payload.get("exp")
-        if exp and datetime.datetime.now(datetime.timezone.utc).timestamp() > exp:
-            raise HTTPException(status_code=401, detail="Google OAuth ID Token has expired")
-
-        return payload
+        if iss in ["accounts.google.com", "https://accounts.google.com"]:
+            exp = payload.get("exp")
+            if exp and datetime.datetime.now(datetime.timezone.utc).timestamp() > exp:
+                raise HTTPException(status_code=401, detail="Google OAuth ID Token has expired")
+            return payload
     except jwt.PyJWTError:
         pass
 

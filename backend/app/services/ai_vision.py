@@ -275,9 +275,12 @@ def verify_resolution(
         inconclusive = True
         ssim_score = 0.0
         reasons.append("After repair visual evidence missing")
+    elif not before_image:
+        inconclusive = True
+        ssim_score = 0.0
+        reasons.append("Before repair visual evidence missing")
     else:
-        effective_before = before_image or "before_evidence.jpg"
-        sim_val = calculate_image_ssim(effective_before, after_image)
+        sim_val = calculate_image_ssim(before_image, after_image)
         ssim_score = sim_val * 100.0 if sim_val <= 1.0 else sim_val
         if ssim_score == 0.0:
             inconclusive = True

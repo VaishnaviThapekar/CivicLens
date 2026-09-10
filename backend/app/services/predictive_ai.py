@@ -21,15 +21,34 @@ def generate_predictive_risks(complaints: Optional[List[Any]] = None) -> List[Pr
 
     total_count = len(complaints)
 
-    ward63_drain = sum(1 for c in complaints if getattr(getattr(c, "location", None), "ward", "") == "Ward 63" and getattr(c, "category", "") in [ComplaintCategory.DRAINAGE_FLOODING, ComplaintCategory.WATER_LEAKAGE])
-    ward12_road = sum(1 for c in complaints if getattr(getattr(c, "location", None), "ward", "") == "Ward 12" and getattr(c, "category", "") in [ComplaintCategory.ROAD_INFRASTRUCTURE, ComplaintCategory.TRAFFIC_SAFETY])
-    ward45_waste = sum(1 for c in complaints if getattr(getattr(c, "location", None), "ward", "") == "Ward 45" and getattr(c, "category", "") == ComplaintCategory.GARBAGE_SANITATION)
+    # Ward complaint aggregations
+    ward_counts: Dict[str, Dict[str, int]] = {}
+    for c in complaints:
+        w = getattr(getattr(c, "location", None), "ward", "Ward 63") or "Ward 63"
+        cat_val = c.category.value if hasattr(c.category, "value") else str(c.category)
+        if w not in ward_counts:
+            ward_counts[w] = {"total": 0, "drainage": 0, "road": 0, "waste": 0}
+        ward_counts[w]["total"] += 1
+        if "DRAINAGE" in cat_val.upper() or "WATER" in cat_val.upper():
+            ward_counts[w]["drainage"] += 1
+        elif "ROAD" in cat_val.upper() or "TRAFFIC" in cat_val.upper():
+            ward_counts[w]["road"] += 1
+        elif "GARBAGE" in cat_val.upper() or "SANITATION" in cat_val.upper():
+            ward_counts[w]["waste"] += 1
+
+    w63_data = ward_counts.get("Ward 63", {"total": 0, "drainage": 0, "road": 0, "waste": 0})
+    w12_data = ward_counts.get("Ward 12", {"total": 0, "drainage": 0, "road": 0, "waste": 0})
+    w45_data = ward_counts.get("Ward 45", {"total": 0, "drainage": 0, "road": 0, "waste": 0})
+
+    ward63_drain = w63_data["drainage"]
+    ward12_road = w12_data["road"]
+    ward45_waste = w45_data["waste"]
 
     p_w63 = min(0.95, round(0.15 + (ward63_drain * 0.18), 2)) if total_count > 0 else 0.15
     p_w12 = min(0.95, round(0.15 + (ward12_road * 0.18), 2)) if total_count > 0 else 0.15
     p_w45 = min(0.95, round(0.15 + (ward45_waste * 0.18), 2)) if total_count > 0 else 0.15
 
-    return [
+    risks = [
         PredictiveRisk(
             id="PR-101",
             zone="Zone 4",
@@ -76,6 +95,32 @@ def generate_predictive_risks(complaints: Optional[List[Any]] = None) -> List[Pr
             historical_correlation=f"Waste risk index evaluated from {ward45_waste} registered sanitation complaints."
         )
     ]
+
+    # Dynamically generate risk items for additional active wards in DB
+    existing_wards = {"Ward 63", "Ward 12", "Ward 45"}
+    idx = 104
+    for w, data in ward_counts.items():
+        if w not in existing_wards and data["total"] > 0:
+            prob = min(0.95, round(0.20 + (data["total"] * 0.15), 2))
+            risks.append(
+                PredictiveRisk(
+                    id=f"PR-{idx}",
+                    zone="Zone Central",
+                    ward=w,
+                    hazard_type=f"Dynamic Infrastructure Stress in {w}",
+                    probability=prob,
+                    risk_level="HIGH" if prob >= 0.60 else "MEDIUM",
+                    trigger_factors=[
+                        f"Actual DB state: {data['total']} total complaints logged in {w}",
+                        f"High activity in category breakdown: {data['drainage']} drainage, {data['road']} road, {data['waste']} waste"
+                    ],
+                    recommended_action=f"Increase field inspection frequency in {w}.",
+                    historical_correlation=f"Computed from {data['total']} live complaints in {w}."
+                )
+            )
+            idx += 1
+
+    return risks
 
 def detect_emerging_anomalies(today_reports_count: int = 0, baseline_daily_norm: int = 5) -> Dict[str, Any]:
     """

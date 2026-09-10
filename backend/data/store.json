@@ -20,6 +20,7 @@
         "zone": "Zone 4",
         "road_name": "College Road Main Line",
         "nearest_landmark": "Near City Campus Gate 2",
+        "location_status": "RESOLVED",
         "postgis_geometry": "ST_SetSRID(ST_Point(73.7898, 19.9975), 4326)"
       },
       "image_url": null,
@@ -29,8 +30,8 @@
       "structured_understanding": null,
       "cluster_id": null,
       "submitted_by": "Citizen",
-      "created_at": "2026-09-10T18:56:52.778991",
-      "updated_at": "2026-09-10T18:56:52.778999",
+      "created_at": "2026-09-10T19:13:08.570868",
+      "updated_at": "2026-09-10T19:13:08.570879",
       "officer_assigned": null,
       "team_assigned": null,
       "resolution_evidence_image_url": null,
@@ -43,5 +44,6 @@
   "user_passwords": {},
   "tokens": {},
   "comments": {},
-  "attachments": {}
+  "attachments": {},
+  "audit_logs": []
 }

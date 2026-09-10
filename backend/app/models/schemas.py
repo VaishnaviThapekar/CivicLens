@@ -65,14 +65,15 @@ class UserProfile(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 class LocationData(BaseModel):
-    lat: float
-    lng: float
+    lat: float = Field(..., ge=-90.0, le=90.0)
+    lng: float = Field(..., ge=-180.0, le=180.0)
     address: str = "Unspecified Location"
     city: str = "Nashik"
     ward: str = "Ward 63"
     zone: str = "Zone 4"
     road_name: str = "College Road Main Line"
     nearest_landmark: str = "Near City Campus Gate 2"
+    location_status: str = "RESOLVED"
     postgis_geometry: str = "ST_SetSRID(ST_Point(73.7898, 19.9975), 4326)"
 
 class AIDetectionDetails(BaseModel):

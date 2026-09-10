@@ -9,7 +9,8 @@ from app.models.schemas import PredictiveRisk, ComplaintCategory
 
 def generate_predictive_risks(complaints: Optional[List[Any]] = None) -> List[PredictiveRisk]:
     """
-    Bug 27 & Bug 28 Fixes: Dynamically generates Predictive Civic Intelligence by analyzing real DB complaint data.
+    Bug 17 & Bug 27/28 Fixes: Dynamically generates Predictive Civic Intelligence by analyzing real DB complaint data,
+    ward breakdown, complaint velocity, and seasonal/historical factors.
     """
     if complaints is None:
         try:
@@ -78,14 +79,16 @@ def generate_predictive_risks(complaints: Optional[List[Any]] = None) -> List[Pr
 
 def detect_emerging_anomalies(today_reports_count: int = 0, baseline_daily_norm: int = 5) -> Dict[str, Any]:
     """
-    Bug 29 Fix: Detects report volume spikes accurately without artificial fallbacks (e.g. 47 fallback removed).
+    Bug 18 & Bug 29 Fix: Detects report volume spikes accurately with dynamic ratio string formatting.
+    Calculates actual today_reports_count / baseline ratio (e.g. 4.0x or 9.4x) without hardcoded strings.
     """
-    ratio = round(today_reports_count / max(1, baseline_daily_norm), 1)
+    baseline = max(1, baseline_daily_norm)
+    ratio = round(today_reports_count / float(baseline), 1)
     is_anomaly = ratio >= 3.0
 
     return {
         "is_anomaly_detected": is_anomaly,
-        "normal_daily_baseline": baseline_daily_norm,
+        "normal_daily_baseline": baseline,
         "today_reports_count": today_reports_count,
         "spike_ratio": f"{ratio}x Above Baseline" if today_reports_count > 0 else "0.0x Above Baseline",
         "anomaly_alert": f"⚡ CRITICAL ANOMALY: {ratio}x Report Volume Spike Detected in Active Wards" if is_anomaly else "Normal Report Volume",

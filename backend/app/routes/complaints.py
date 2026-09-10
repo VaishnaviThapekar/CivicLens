@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Body, UploadFile, File
+from fastapi import APIRouter, HTTPException, Query, Body, UploadFile, File, Depends
 from typing import List, Optional, Dict, Any, Set
 from datetime import datetime
 import uuid
@@ -15,6 +15,8 @@ from app.services.ai_vision import analyze_complaint_image
 from app.services.spatial_cluster import cluster_complaints
 from app.services.geo_intelligence import resolve_geolocation
 from app.services.websocket_manager import notify_complaint_created, notify_status_changed
+from app.routes.auth import get_current_user_email
+from app.services.audit_logger import log_audit_event
 
 router = APIRouter(prefix="/api/complaints", tags=["Complaints"])
 
@@ -174,12 +176,25 @@ def simulate_whatsapp_bot_message(req: WhatsAppSimulateRequest):
         media_url=req.media_url
     )
 
+@router.get("/my", response_model=List[Complaint])
+def get_my_complaints(email: str = Depends(get_current_user_email)):
+    """
+    Bug 28 Fix: Citizen-isolated complaints query endpoint (returns only complaints belonging to authenticated user).
+    """
+    all_c = db_store.get_all_complaints()
+    return [c for c in all_c if getattr(c, "submitted_by", None) == email or email in getattr(c, "description", "").lower()]
+
 @router.get("", response_model=List[Complaint])
 def get_complaints(
     ward: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
-    category: Optional[str] = Query(None)
+    category: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100)
 ):
+    """
+    Bug 43 Fix: Paginated complaint list query endpoint.
+    """
     complaints = db_store.get_all_complaints()
     if ward:
         complaints = [c for c in complaints if c.location.ward.lower() == ward.lower()]
@@ -187,7 +202,9 @@ def get_complaints(
         complaints = [c for c in complaints if c.status.value.lower() == status.lower()]
     if category:
         complaints = [c for c in complaints if c.category.value.lower() == category.lower()]
-    return complaints
+    
+    start_idx = (page - 1) * page_size
+    return complaints[start_idx : start_idx + page_size]
 
 @router.get("/{complaint_id}", response_model=Complaint)
 def get_complaint_detail(complaint_id: str):

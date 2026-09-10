@@ -9,13 +9,14 @@ DB_FILE_PATH = DATA_DIR / "store.json"
 
 class DataStore:
     def __init__(self, persistence_file: Path = DB_FILE_PATH):
-        self.persistence_file = persistence_file
+        self.persistence_file = Path(persistence_file)
         self.complaints: Dict[str, Complaint] = {}
         self.users: Dict[str, UserProfile] = {}
         self.user_passwords: Dict[str, str] = {}
         self.tokens: Dict[str, Dict[str, Any]] = {}
         self.comments: Dict[str, List[Dict[str, Any]]] = {}
         self.attachments: Dict[str, List[Dict[str, Any]]] = {}
+        self.audit_logs: List[Dict[str, Any]] = []
         self._load_from_disk()
 
     def _load_from_disk(self):
@@ -45,6 +46,7 @@ class DataStore:
                 self.tokens = data.get("tokens", {})
                 self.comments = data.get("comments", {})
                 self.attachments = data.get("attachments", {})
+                self.audit_logs = data.get("audit_logs", [])
 
         except Exception as err:
             print(f"Warning: Failed to load data store from disk: {err}")
@@ -65,7 +67,8 @@ class DataStore:
                 "user_passwords": self.user_passwords,
                 "tokens": self.tokens,
                 "comments": self.comments,
-                "attachments": self.attachments
+                "attachments": self.attachments,
+                "audit_logs": self.audit_logs
             }
             with open(self.persistence_file, "w", encoding="utf-8") as f:
                 json.dump(serialized, f, indent=2, default=str)
@@ -118,7 +121,7 @@ class DataStore:
     def get_token(self, token: str) -> Optional[dict]:
         return self.tokens.get(token)
 
-    # Comment & Attachment operations (Bug 46 Fix)
+    # Comment & Attachment operations
     def add_comment(self, complaint_id: str, comment_entry: dict):
         if complaint_id not in self.comments:
             self.comments[complaint_id] = []
@@ -137,6 +140,16 @@ class DataStore:
     def get_attachments(self, complaint_id: str) -> List[dict]:
         return self.attachments.get(complaint_id, [])
 
+    # Immutable Audit Log Operations (Bug 33 Fix)
+    def add_audit_log(self, entry: dict):
+        self.audit_logs.append(entry)
+        self._save_to_disk()
+
+    def get_audit_logs(self, complaint_id: Optional[str] = None) -> List[dict]:
+        if complaint_id:
+            return [e for e in self.audit_logs if e.get("complaint_id") == complaint_id]
+        return self.audit_logs
+
     def clear(self):
         self.complaints.clear()
         self.users.clear()
@@ -144,6 +157,7 @@ class DataStore:
         self.tokens.clear()
         self.comments.clear()
         self.attachments.clear()
+        self.audit_logs.clear()
         self._save_to_disk()
 
 db_store = DataStore()

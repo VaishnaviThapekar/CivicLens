@@ -26,6 +26,8 @@ def test_strict_401_authentication_rejection():
     assert res_invalid.status_code == 401
 
 def test_otp_expiry_and_rate_limiting():
+    from app.routes import auth
+    auth.DEMO_MODE = True
     # Dispatch OTP
     res_send = client.post("/api/auth/otp/send", json={"phone": "+91 9998887776"})
     assert res_send.status_code == 200

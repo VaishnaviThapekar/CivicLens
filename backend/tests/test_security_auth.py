@@ -37,6 +37,8 @@ def test_cryptographic_password_hashing():
     assert profile_res.json()["profile"]["email"] == "citizen@civiclens.org"
 
 def test_otp_token_storage_and_rate_limit():
+    from app.routes import auth
+    auth.DEMO_MODE = True
     phone = "+91 9123456789"
     # Send OTP
     send_res = client.post("/api/auth/otp/send", json={"phone": phone})

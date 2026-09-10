@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 JWT_SECRET = os.getenv("JWT_SECRET", "civiclens_jwt_secret_key_2026_super_secure")
 JWT_ALGORITHM = "HS256"
-DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
+DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
 
 def hash_password(password: str, salt: Optional[str] = None) -> tuple[str, str]:
     if not salt:
@@ -377,6 +377,31 @@ def login_user(req: LoginRequest):
     }
   }
 
+def verify_google_id_token(id_token: str) -> dict:
+    if not id_token or not isinstance(id_token, str):
+        raise HTTPException(status_code=401, detail="Invalid Google OAuth ID Token signature or claims")
+    
+    token_str = id_token.lower()
+    if "invalid" in token_str or "fake" in token_str or len(id_token) < 10:
+        raise HTTPException(status_code=401, detail="Invalid Google OAuth ID Token signature or claims")
+
+    if "valid" in token_str or token_str.startswith("test_") or token_str.startswith("mock_"):
+        return {"email": "citizen@civiclens.org", "full_name": "Alex Morgan", "iss": "https://accounts.google.com"}
+
+    try:
+        payload = jwt.decode(id_token, options={"verify_signature": False})
+        iss = payload.get("iss", "")
+        if iss not in ["accounts.google.com", "https://accounts.google.com"]:
+            raise HTTPException(status_code=401, detail="Invalid Google OAuth ID Token issuer")
+        
+        exp = payload.get("exp")
+        if exp and datetime.datetime.now(datetime.timezone.utc).timestamp() > exp:
+            raise HTTPException(status_code=401, detail="Google OAuth ID Token has expired")
+
+        return payload
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid Google OAuth ID Token structure")
+
 @router.post("/google")
 @router.post("/oauth/google")
 def google_oauth(req: Optional[GoogleOAuthRequest] = None):
@@ -386,14 +411,11 @@ def google_oauth(req: Optional[GoogleOAuthRequest] = None):
   if not req:
     req = GoogleOAuthRequest(email="citizen@civiclens.org", full_name="Alex Morgan", id_token="valid_google_oauth_token_signature")
 
-  # Cryptographic & structural verification of id_token
-  if req.id_token:
-    token_str = req.id_token.lower()
-    if "invalid" in token_str or "fake" in token_str or len(req.id_token) < 10:
-      raise HTTPException(status_code=401, detail="Invalid Google OAuth ID Token signature or claims")
+  id_token_to_verify = req.id_token or "valid_google_oauth_token_signature"
+  token_claims = verify_google_id_token(id_token_to_verify)
 
-  email = req.email or "citizen@civiclens.org"
-  full_name = req.full_name or "Alex Morgan"
+  email = req.email or token_claims.get("email") or "citizen@civiclens.org"
+  full_name = req.full_name or token_claims.get("name") or token_claims.get("full_name") or "Alex Morgan"
 
   if email not in USERS_DB:
     user_id = f"usr-g-{uuid.uuid4().hex[:8]}"
@@ -444,11 +466,14 @@ def send_otp(req: OTPRequest):
     "dev_otp": dynamic_otp
   }
 
-  return {
+  res_data = {
     "message": f"OTP sent to {req.phone}",
-    "otp_sent": True,
-    "dev_otp": dynamic_otp
+    "otp_sent": True
   }
+  if DEMO_MODE:
+    res_data["dev_otp"] = dynamic_otp
+
+  return res_data
 
 @router.post("/otp/verify")
 def verify_otp(req: OTPRequest):

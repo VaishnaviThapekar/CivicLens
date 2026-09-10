@@ -8,7 +8,7 @@ from app.services.ai_vision import verify_resolution
 from app.models.schemas import ResolutionVerificationResult, ComplaintStatus
 
 from app.routes.complaints import validate_status_transition
-from app.routes.auth import get_current_user
+from app.routes.auth import get_current_user, require_role
 
 router = APIRouter(prefix="/api/verification", tags=["Resolution Verification"])
 
@@ -27,7 +27,10 @@ class CitizenFeedbackSubmission(BaseModel):
     citizen_notes: Optional[str] = None
 
 @router.post("/verify-resolution", response_model=ResolutionVerificationResult)
-def verify_officer_resolution(payload: ResolutionEvidenceSubmission):
+def verify_officer_resolution(
+    payload: ResolutionEvidenceSubmission,
+    current_user: Dict[str, Any] = Depends(require_role("Officer", "Supervisor", "Administrator"))
+):
     """
     Submits officer resolution evidence & executes Computer Vision Verification:
     - Compares Before vs After images (SSIM)
@@ -38,9 +41,11 @@ def verify_officer_resolution(payload: ResolutionEvidenceSubmission):
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint ID not found")
 
+    officer_identity = current_user.get("user_id") or payload.officer_id
+
     verification_res = verify_resolution(
         complaint_id_or_img=payload.complaint_id,
-        officer_id=payload.officer_id,
+        officer_id=officer_identity,
         after_image=payload.evidence_image_url,
         officer_notes=payload.officer_notes,
         gps_lat=payload.gps_lat,
@@ -68,10 +73,11 @@ def verify_officer_resolution(payload: ResolutionEvidenceSubmission):
     validate_status_transition(complaint.status, target_status)
     complaint.status = target_status
 
+    actor_name = current_user.get("full_name") or current_user.get("email")
     complaint.status_history.append({
         "status": complaint.status.value,
         "timestamp": now_iso,
-        "actor": "Officer & AI Inspector",
+        "actor": f"Officer ({actor_name}) & AI Inspector",
         "notes": verification_res.message
     })
 
@@ -80,8 +86,11 @@ def verify_officer_resolution(payload: ResolutionEvidenceSubmission):
 
 # Bug 37 Fix: Backend route alias handler for /verify endpoint (matches frontend api.ts call)
 @router.post("/verify", response_model=ResolutionVerificationResult)
-def verify_resolution_alias(payload: ResolutionEvidenceSubmission):
-    return verify_officer_resolution(payload)
+def verify_resolution_alias(
+    payload: ResolutionEvidenceSubmission,
+    current_user: Dict[str, Any] = Depends(require_role("Officer", "Supervisor", "Administrator"))
+):
+    return verify_officer_resolution(payload, current_user=current_user)
 
 @router.post("/citizen-feedback")
 def submit_citizen_feedback(payload: CitizenFeedbackSubmission, current_user: Dict[str, Any] = Depends(get_current_user)):

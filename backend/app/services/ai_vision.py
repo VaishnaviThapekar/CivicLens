@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
+import urllib.request
 from PIL import Image
 import numpy as np
 
@@ -31,11 +32,21 @@ SUBCATEGORY_TREE = {
 }
 
 def load_image_as_array(image_input: Optional[str]) -> Optional[np.ndarray]:
-    """Attempts to load an image input (file path, relative /uploads path, or base64) into a NumPy RGB array."""
+    """Attempts to load an image input (file path, relative /uploads path, base64, or HTTP/HTTPS URL) into a NumPy RGB array."""
     if not image_input:
         return None
     try:
         raw = str(image_input).strip()
+        if raw.startswith("http://") or raw.startswith("https://"):
+            try:
+                req = urllib.request.Request(raw, headers={"User-Agent": "CivicLens-AI/1.0"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    img_bytes = resp.read()
+                    img = Image.open(BytesIO(img_bytes)).convert("RGB")
+                    return np.array(img)
+            except Exception:
+                return None
+
         img_path = None
         if raw.startswith("/uploads/"):
             fname = raw.replace("/uploads/", "")
@@ -164,7 +175,7 @@ def analyze_image(image_input: Optional[str], user_description: str = "") -> Opt
 
 analyze_complaint_image = analyze_image
 
-def calculate_image_ssim(img1: str, img2: str) -> float:
+def calculate_image_ssim(img1: Optional[str], img2: Optional[str]) -> float:
     """Calculates Structural Similarity Index (SSIM) between two images using PIL & NumPy pixel arrays."""
     if not img1 or not img2:
         return 0.0
@@ -201,7 +212,7 @@ def calculate_image_ssim(img1: str, img2: str) -> float:
         except Exception:
             pass
 
-    # Non-fake string image identifiers fallback
+    # Non-fake string image identifiers fallback (for string URL references)
     return 0.94
 
 def verify_resolution(
@@ -268,7 +279,10 @@ def verify_resolution(
         effective_before = before_image or "before_evidence.jpg"
         sim_val = calculate_image_ssim(effective_before, after_image)
         ssim_score = sim_val * 100.0 if sim_val <= 1.0 else sim_val
-        if ssim_score < 50.0:
+        if ssim_score == 0.0:
+            inconclusive = True
+            reasons.append("Visual evidence images could not be loaded")
+        elif ssim_score < 50.0:
             fake_detected = True
             reasons.append(f"Low visual similarity ({ssim_score:.1f}%)")
 

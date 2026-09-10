@@ -18,6 +18,8 @@ def test_google_oauth():
     assert "access_token" in res.json()
 
 def test_otp_flow():
+    from app.routes import auth
+    auth.DEMO_MODE = True
     res_send = client.post("/api/auth/otp/send", json={"phone": "+91 98765 43210"})
     assert res_send.status_code == 200
     res_verify = client.post("/api/auth/otp/verify", json={"phone": "+91 98765 43210", "otp": "123456"})

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Body, UploadFile, File, Depends
+from fastapi import APIRouter, HTTPException, Query, Body, UploadFile, File, Depends, Header
 from typing import List, Optional, Dict, Any, Set
 from datetime import datetime
 import uuid
@@ -20,6 +20,15 @@ from app.services.geo_intelligence import resolve_geolocation
 from app.services.websocket_manager import notify_complaint_created, notify_status_changed
 from app.routes.auth import get_current_user_email, get_current_user, require_role
 from app.services.audit_logger import log_audit_event
+
+def get_optional_user(authorization: Optional[str] = Header(None)) -> Optional[Dict[str, Any]]:
+    if not authorization:
+        return None
+    try:
+        email = get_current_user_email(authorization)
+        return get_current_user(email)
+    except Exception:
+        return None
 
 router = APIRouter(prefix="/api/complaints", tags=["Complaints"])
 
@@ -120,7 +129,7 @@ class WhatsAppSimulateRequest(BaseModel):
   media_url: Optional[str] = "https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=600&auto=format&fit=crop"
 
 @router.post("", response_model=Complaint)
-def create_complaint(payload: ComplaintCreate):
+def create_complaint(payload: ComplaintCreate, current_user: Optional[Dict[str, Any]] = Depends(get_optional_user)):
     comp_id = f"c-{uuid.uuid4().hex[:6]}"
     tracking_num = f"CL-NK-{datetime.now().year}-{uuid.uuid4().hex[:6].upper()}"
 
@@ -143,6 +152,8 @@ def create_complaint(payload: ComplaintCreate):
         payload.description if image_input else ""
     )
 
+    submitted_by = current_user.get("email") if current_user else "citizen@civiclens.org"
+
     new_complaint = Complaint(
         id=comp_id,
         tracking_number=tracking_num,
@@ -155,6 +166,7 @@ def create_complaint(payload: ComplaintCreate):
         priority_reason=nlp_result["priority_reason"],
         status=ComplaintStatus.SUBMITTED,
         location=resolved_loc,
+        submitted_by=submitted_by,
         image_url=payload.image_url,
         video_url=payload.video_url,
         voice_transcript=payload.voice_transcript,
@@ -165,7 +177,7 @@ def create_complaint(payload: ComplaintCreate):
         status_history=[{
             "status": ComplaintStatus.SUBMITTED.value,
             "timestamp": datetime.now().isoformat(),
-            "actor": "Citizen",
+            "actor": f"Citizen ({submitted_by})",
             "notes": "Multimodal issue report submitted"
         }]
     )
@@ -194,10 +206,10 @@ def simulate_whatsapp_bot_message(req: WhatsAppSimulateRequest):
 @router.get("/my", response_model=List[Complaint])
 def get_my_complaints(email: str = Depends(get_current_user_email)):
     """
-    Bug 28 Fix: Citizen-isolated complaints query endpoint (returns only complaints belonging to authenticated user).
+    Bug 28 Fix: Citizen-isolated complaints query endpoint (returns only complaints belonging strictly to authenticated user).
     """
     all_c = db_store.get_all_complaints()
-    return [c for c in all_c if getattr(c, "submitted_by", None) == email or email in getattr(c, "description", "").lower()]
+    return [c for c in all_c if getattr(c, "submitted_by", None) == email]
 
 @router.get("", response_model=List[Complaint])
 def get_complaints(
@@ -221,15 +233,54 @@ def get_complaints(
     start_idx = (page - 1) * page_size
     return complaints[start_idx : start_idx + page_size]
 
-@router.get("/{complaint_id}", response_model=Complaint)
-def get_complaint_detail(complaint_id: str):
+@router.get("/{complaint_id}")
+def get_complaint_detail(complaint_id: str, authorization: Optional[str] = Header(None)):
+    """
+    Data Privacy & Schema Separation: Unauthenticated requests receive sanitized public view;
+    authenticated owners / authority receive detailed complaint payload.
+    """
     complaint = db_store.get_complaint_by_id(complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
-    return complaint
+    
+    is_authorized = False
+    if authorization:
+        try:
+            email = get_current_user_email(authorization)
+            user = get_current_user(email)
+            if user.get("role") in ["Officer", "Supervisor", "Administrator"] or getattr(complaint, "submitted_by", None) == email:
+                is_authorized = True
+        except Exception:
+            pass
+
+    if is_authorized:
+        return complaint
+
+    return {
+        "id": complaint.id,
+        "tracking_number": complaint.tracking_number,
+        "title": complaint.title,
+        "category": complaint.category.value if hasattr(complaint.category, "value") else str(complaint.category),
+        "ward": complaint.location.ward if complaint.location else None,
+        "location": {
+            "city": complaint.location.city,
+            "ward": complaint.location.ward,
+            "lat": complaint.location.lat,
+            "lng": complaint.location.lng
+        } if complaint.location else None,
+        "status": complaint.status.value if hasattr(complaint.status, "value") else str(complaint.status),
+        "priority": complaint.priority.value if hasattr(complaint.priority, "value") else str(complaint.priority),
+        "created_at": complaint.created_at,
+        "image_url": complaint.image_url,
+        "is_public_view": True
+    }
 
 @router.put("/{complaint_id}/status")
-def update_complaint_status(complaint_id: str, req: StatusUpdateRequest):
+def update_complaint_status(
+    complaint_id: str,
+    req: StatusUpdateRequest,
+    current_user: Dict[str, Any] = Depends(require_role("Officer", "Supervisor", "Administrator"))
+):
     complaint = db_store.get_complaint_by_id(complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
@@ -250,24 +301,22 @@ def update_complaint_status(complaint_id: str, req: StatusUpdateRequest):
 
     st_key = req.status.lower()
     if st_key not in status_map:
-        # Bug 7 Fix: Reject invalid status instead of returning dummy success
         raise HTTPException(
             status_code=400,
             detail=f"Invalid complaint status '{req.status}'. Valid statuses: {list(status_map.keys())}"
         )
 
     new_st = status_map[st_key]
-    
-    # Bug 8 Fix: Validate workflow transition
     validate_status_transition(complaint.status, new_st)
 
     complaint.status = new_st
     now_iso = datetime.now().isoformat()
     complaint.updated_at = now_iso
+    actor_str = f"{current_user.get('role')} ({current_user.get('full_name') or current_user.get('email')})"
     complaint.status_history.append({
         "status": complaint.status.value,
         "timestamp": now_iso,
-        "actor": "System / Officer",
+        "actor": actor_str,
         "notes": req.notes or f"Status updated to {complaint.status.value}"
     })
     db_store.update_complaint(complaint)
@@ -276,7 +325,11 @@ def update_complaint_status(complaint_id: str, req: StatusUpdateRequest):
     return {"status": "success", "new_status": complaint.status.value, "notes": req.notes}
 
 @router.post("/{complaint_id}/reopen")
-def reopen_complaint(complaint_id: str, reason: str = Body(..., embed=True)):
+def reopen_complaint(
+    complaint_id: str,
+    reason: str = Body(..., embed=True),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     complaint = db_store.get_complaint_by_id(complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
@@ -286,10 +339,11 @@ def reopen_complaint(complaint_id: str, reason: str = Body(..., embed=True)):
     complaint.status = ComplaintStatus.REOPENED
     now_iso = datetime.now().isoformat()
     complaint.updated_at = now_iso
+    actor_str = f"Citizen ({current_user.get('full_name') or current_user.get('email')})"
     complaint.status_history.append({
         "status": complaint.status.value,
         "timestamp": now_iso,
-        "actor": "Citizen",
+        "actor": actor_str,
         "notes": f"⚠️ Issue Reopened: {reason}"
     })
     db_store.update_complaint(complaint)
@@ -297,7 +351,7 @@ def reopen_complaint(complaint_id: str, reason: str = Body(..., embed=True)):
     if complaint_id not in COMMENTS_STORE:
         COMMENTS_STORE[complaint_id] = []
     COMMENTS_STORE[complaint_id].append({
-        "author": "Citizen / System",
+        "author": actor_str,
         "type": "citizen",
         "text": f"⚠️ Issue Reopened: {reason}",
         "timestamp": now_iso
@@ -306,7 +360,11 @@ def reopen_complaint(complaint_id: str, reason: str = Body(..., embed=True)):
     return {"message": "Issue successfully reopened and escalated to supervisor.", "status": complaint.status.value}
 
 @router.put("/{complaint_id}/assign")
-def assign_reassign_complaint(complaint_id: str, req: ReassignRequest):
+def assign_reassign_complaint(
+    complaint_id: str,
+    req: ReassignRequest,
+    current_user: Dict[str, Any] = Depends(require_role("Supervisor", "Administrator"))
+):
     complaint = db_store.get_complaint_by_id(complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
@@ -321,10 +379,11 @@ def assign_reassign_complaint(complaint_id: str, req: ReassignRequest):
     complaint.status = ComplaintStatus.ASSIGNED
     now_iso = datetime.now().isoformat()
     complaint.updated_at = now_iso
+    actor_str = f"Supervisor ({current_user.get('full_name') or current_user.get('email')})"
     complaint.status_history.append({
         "status": complaint.status.value,
         "timestamp": now_iso,
-        "actor": "Supervisor",
+        "actor": actor_str,
         "notes": f"Assigned to {complaint.department} ({complaint.officer_assigned or 'Officer'})"
     })
     db_store.update_complaint(complaint)

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.db.store import db_store
+from app.routes.auth import create_access_token
 from app.models.schemas import Complaint, LocationData, ComplaintCategory, ComplaintStatus, PriorityLevel
 from app.services.ai_vision import analyze_image, calculate_image_ssim, verify_resolution
 from app.services.spatial_cluster import cluster_complaints_spatially
@@ -61,7 +62,8 @@ def test_bug_13_team_assignment_field_persisted():
         "team": "Alpha Rapid Action Squad 4"
     }
 
-    res = client.put(f"/api/complaints/{comp.id}/assign", json=reassign_payload)
+    supervisor_token = create_access_token("supervisor@civiclens.org", "Supervisor", "usr-supervisor-001")
+    res = client.put(f"/api/complaints/{comp.id}/assign", json=reassign_payload, headers={"Authorization": f"Bearer {supervisor_token}"})
     assert res.status_code == 200
     data = res.json()
     assert data["team"] == "Alpha Rapid Action Squad 4"
@@ -139,6 +141,7 @@ def test_bug_18_ai_verification_pending_citizen_confirmation():
     comp.status = ComplaintStatus.IN_PROGRESS
     db_store.update_complaint(comp)
 
+    officer_token = create_access_token("officer@civiclens.org", "Officer", "usr-officer-001")
     res = client.post("/api/verification/verify-resolution", json={
         "complaint_id": comp.id,
         "officer_id": "Officer Desk 1",
@@ -146,7 +149,7 @@ def test_bug_18_ai_verification_pending_citizen_confirmation():
         "evidence_image_url": "https://example.com/genuine_fix.jpg",
         "gps_lat": 19.9975,
         "gps_lng": 73.7898
-    })
+    }, headers={"Authorization": f"Bearer {officer_token}"})
 
     assert res.status_code == 200
     v_data = res.json()

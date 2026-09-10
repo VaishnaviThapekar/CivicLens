@@ -168,7 +168,10 @@ def update_sla_configuration(
     return {"message": "SLA matrix configuration updated", "sla_matrix": CUSTOM_SLA_MATRIX, "updated_by": user.get("email")}
 
 @router.get("/sla/tracking/{complaint_id}")
-def get_complaint_sla_tracking(complaint_id: str):
+def get_complaint_sla_tracking(
+    complaint_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
     complaint = db_store.get_complaint_by_id(complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")

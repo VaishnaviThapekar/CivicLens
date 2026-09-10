@@ -1,11 +1,12 @@
 import os
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, APIRouter
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, APIRouter, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 from typing import Optional
 from fastapi.staticfiles import StaticFiles
 
 from app.routes import complaints, verification, officer, intelligence, supervisor, auth
+from app.routes.auth import require_role, get_current_user_email
 from app.services.pdf_export import generate_audit_report
 from app.services.websocket_manager import manager
 from app.db.store import db_store
@@ -54,6 +55,13 @@ app.include_router(v1_router)
 # Bugs 45 & 46 Fix: Authenticated & Structured Event WebSocket Connection Handler
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
+    if token:
+        try:
+            get_current_user_email(f"Bearer {token}")
+        except Exception:
+            await websocket.close(code=4001, reason="Unauthorized connection")
+            return
+
     await manager.connect(websocket)
     try:
         while True:
@@ -65,7 +73,10 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
 
 @app.get("/api/complaints/{complaint_id}/audit-dossier")
 @app.get("/api/v1/complaints/{complaint_id}/audit-dossier")
-def get_complaint_audit_dossier(complaint_id: str):
+def get_complaint_audit_dossier(
+    complaint_id: str,
+    user: dict = Depends(require_role("Supervisor", "Administrator"))
+):
     complaint = db_store.get_complaint_by_id(complaint_id)
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")

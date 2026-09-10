@@ -40,20 +40,24 @@ def test_bug6_datastore_persistence():
     assert db_store.persistence_file.exists()
 
 def test_bug7_invalid_status_rejection():
+    from app.routes.auth import create_access_token
+    officer_token = create_access_token("officer@civiclens.org", "Officer", "usr-off-1")
     c = setup_fresh_complaint("c-bug7")
-    res = client.put(f"/api/complaints/{c.id}/status", json={"status": "invalid_status_xyz"})
+    res = client.put(f"/api/complaints/{c.id}/status", json={"status": "invalid_status_xyz"}, headers={"Authorization": f"Bearer {officer_token}"})
     assert res.status_code == 400
     assert "Invalid complaint status" in res.json()["detail"]
 
 def test_bug8_invalid_workflow_transition():
+    from app.routes.auth import create_access_token
+    officer_token = create_access_token("officer@civiclens.org", "Officer", "usr-off-1")
     c = setup_fresh_complaint("c-bug8")
     # SUBMITTED -> CLOSED is invalid direct transition
-    res = client.put(f"/api/complaints/{c.id}/status", json={"status": "closed"})
+    res = client.put(f"/api/complaints/{c.id}/status", json={"status": "closed"}, headers={"Authorization": f"Bearer {officer_token}"})
     assert res.status_code == 400
     assert "Invalid lifecycle transition" in res.json()["detail"]
 
     # Valid transition SUBMITTED -> ASSIGNED
-    res_valid = client.put(f"/api/complaints/{c.id}/status", json={"status": "assigned"})
+    res_valid = client.put(f"/api/complaints/{c.id}/status", json={"status": "assigned"}, headers={"Authorization": f"Bearer {officer_token}"})
     assert res_valid.status_code == 200
     assert res_valid.json()["new_status"] == "Assigned to Department"
 

@@ -259,6 +259,25 @@ def trigger_cpgrams_national_sync(user: Dict[str, Any] = Depends(require_role("S
     """Executes CPGRAMS national portal synchronization."""
     return execute_cpgrams_sync_all()
 
+@router.get("/material-estimate/{complaint_id}")
+def get_complaint_material_estimate(complaint_id: str, user: Dict[str, Any] = Depends(get_current_user)):
+    """Calculates repair material breakdown and estimated budget in INR for a complaint."""
+    complaint = db_store.get_complaint_by_id(complaint_id)
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+
+    from app.services.material_quantifier import estimate_repair_materials
+    cat_val = complaint.category.value if hasattr(complaint.category, "value") else str(complaint.category)
+    sev_val = complaint.priority.value if hasattr(complaint.priority, "value") else str(complaint.priority)
+    area = getattr(complaint.ai_detection, "estimated_area_m2", 1.8) if complaint.ai_detection else 1.8
+
+    return estimate_repair_materials(category=cat_val, area_sqm=area, severity=sev_val)
+
+@router.get("/drone-audits")
+def get_drone_inspection_feed(user: Dict[str, Any] = Depends(get_current_user)):
+    """Returns drone aerial inspection audit logs."""
+    return get_drone_inspection_audits()
+
 
 
 

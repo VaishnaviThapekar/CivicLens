@@ -8,6 +8,8 @@ from app.services.priority_engine import calculate_priority_score
 from app.services.duplicate_detector import analyze_root_cause_clusters
 from app.services.sla_engine import DEFAULT_SLA_CONFIG, calculate_sla_deadline
 from app.services.iot_sensor import get_live_iot_sensor_feed, get_drone_inspection_audits
+from app.services.contractor_scorecard import get_contractor_scorecard
+from app.services.cpgrams_sync import execute_cpgrams_sync_all
 from app.models.schemas import WardSummary, StatsOverview, PredictiveRisk, CivicIncidentCluster, ComplaintStatus
 from app.routes.auth import require_role, get_current_user
 
@@ -246,6 +248,16 @@ def download_ward_audit_pdf_report(ward_name: str = "Ward 63 (College Road)"):
     from app.services.pdf_export import generate_ward_audit_report_html
     html_content = generate_ward_audit_report_html(ward_name=ward_name)
     return HTMLResponse(content=html_content, status_code=200)
+
+@router.get("/contractors/scorecard")
+def get_contractor_quality_scorecard(user: Dict[str, Any] = Depends(get_current_user)):
+    """Returns dynamic contractor quality & SLA audit scorecards."""
+    return get_contractor_scorecard()
+
+@router.get("/cpgrams/sync")
+def trigger_cpgrams_national_sync(user: Dict[str, Any] = Depends(require_role("Supervisor", "Administrator"))):
+    """Executes CPGRAMS national portal synchronization."""
+    return execute_cpgrams_sync_all()
 
 
 

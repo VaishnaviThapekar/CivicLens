@@ -9,8 +9,16 @@ export default function ContractorScorecardPage() {
   useEffect(() => {
     async function loadData() {
       try {
-        const res = await fetch("http://localhost:8000/api/intelligence/governance/contractors");
-        if (res.ok) setContractors(await res.json());
+        const token = localStorage.getItem("civiclens_token");
+        const headers: any = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const res = await fetch("http://localhost:8000/api/intelligence/contractors/scorecard", { headers });
+        if (res.ok) {
+          setContractors(await res.json());
+        } else {
+          const fallback = await fetch("http://localhost:8000/api/intelligence/governance/contractors");
+          if (fallback.ok) setContractors(await fallback.json());
+        }
       } catch (e) {
         console.error("Contractor fetch error", e);
       }

@@ -282,12 +282,23 @@ def verify_resolution(
     else:
         sim_val = calculate_image_ssim(before_image, after_image)
         ssim_score = sim_val * 100.0 if sim_val <= 1.0 else sim_val
-        if ssim_score == 0.0:
-            inconclusive = True
-            reasons.append("Visual evidence images could not be loaded")
-        elif ssim_score < 50.0:
-            fake_detected = True
-            reasons.append(f"Low visual similarity ({ssim_score:.1f}%)")
+        try:
+            from app.services.exif_phash import check_perceptual_similarity
+            is_dup, p_sim, h_dist = check_perceptual_similarity(before_image, after_image)
+            if is_dup and h_dist <= 4:
+                fake_detected = True
+                ssim_score = 15.0
+                reasons.append(f"Identical un-repaired photo recycled as after evidence (dHash match {p_sim}%)")
+        except Exception:
+            pass
+
+        if not fake_detected:
+            if ssim_score == 0.0:
+                inconclusive = True
+                reasons.append("Visual evidence images could not be loaded")
+            elif ssim_score < 50.0:
+                fake_detected = True
+                reasons.append(f"Low visual similarity ({ssim_score:.1f}%)")
 
     if fake_detected:
         return ResolutionVerificationResult(

@@ -93,3 +93,31 @@ def verify_photo_authenticity(
             "recycled_photo_flag": False,
             "message": "Standard web photo upload processed."
         }
+
+def check_perceptual_similarity(img1_input: Optional[str], img2_input: Optional[str]) -> Tuple[bool, float, int]:
+    """
+    Compares two image inputs via perceptual dHash fingerprinting.
+    Returns (is_recycled_duplicate, similarity_percentage, hamming_dist).
+    If hamming distance <= 8 bits (out of 64), images are perceptually identical/recycled.
+    """
+    if not img1_input or not img2_input:
+        return False, 0.0, 64
+
+    try:
+        from app.services.ai_vision import load_image_as_array
+        arr1 = load_image_as_array(img1_input)
+        arr2 = load_image_as_array(img2_input)
+
+        if arr1 is None or arr2 is None:
+            return False, 0.0, 64
+
+        pil1 = Image.fromarray(arr1)
+        pil2 = Image.fromarray(arr2)
+        dh1 = compute_dhash(pil1)
+        dh2 = compute_dhash(pil2)
+        dist = hamming_distance(dh1, dh2)
+        sim_pct = round(max(0.0, (64 - dist) / 64.0 * 100.0), 2)
+        is_duplicate = dist <= 8
+        return is_duplicate, sim_pct, dist
+    except Exception:
+        return False, 0.0, 64

@@ -99,18 +99,28 @@ def parse_multilingual_report(text: str, voice_transcript: str = "") -> dict:
     severity = explainable_res["severity_label"].upper()
     priority_reason = f"Dynamic Multi-Factor Score ({explainable_res['total_score']}/100): Risks: {', '.join(explainable_res['detected_risks']) or 'General Civic SLA'}"
 
+    urgent_words = ["danger", "hazard", "overflow", "urgent", "accident", "emergency", "critical", "school", "hospital", "मदत", "धोका", "खूप", "इमर्जन्सी"]
+    urgent_hits = sum(1 for w in urgent_words if w in combined)
+    sentiment_urgency_score = round(min(1.0, 0.35 + (urgent_hits * 0.20)), 2)
+
+    landmarks = []
+    if any(w in combined for w in ["school", "शाळा", "स्कूल"]): landmarks.append("School Zone")
+    if any(w in combined for w in ["hospital", "रुग्णालय", "अस्पताल"]): landmarks.append("Hospital Zone")
+    if any(w in combined for w in ["bus", "station", "बस", "स्थानक"]): landmarks.append("Public Transit Hub")
+    if any(w in combined for w in ["market", "bazaar", "बाजार"]): landmarks.append("Commercial Market")
+
     structured = StructuredAIUnderstanding(
         category=category,
         subcategory=subcategory,
         severity=severity,
         urgency="24_HOURS" if severity in ["CRITICAL", "HIGH"] else "SCHEDULED",
         duration="Persistent (24-72 Hours)",
-        location_description="Parsed from GPS / Landmark text",
+        location_description=f"Landmarks: {', '.join(landmarks) if landmarks else 'Standard Ward Telemetry'}",
         potential_risk=", ".join(explainable_res["detected_risks"]) or "GENERAL_SLA_HAZARD",
         department=department,
         required_action="Dispatch repair team for inspection and remediation",
         confidence=0.92 if category != ComplaintCategory.ROAD_INFRASTRUCTURE or "pothole" in combined else 0.65,
-        keywords=[category.value, subcategory, lang],
+        keywords=[category.value, subcategory, lang] + landmarks,
         detected_objects=["Public Infrastructure", "Pedestrian Corridor"]
     )
 
@@ -120,6 +130,8 @@ def parse_multilingual_report(text: str, voice_transcript: str = "") -> dict:
         "department": department,
         "priority": priority,
         "priority_reason": priority_reason,
+        "sentiment_urgency_score": sentiment_urgency_score,
+        "detected_landmarks": landmarks,
         "structured_understanding": structured
     }
 

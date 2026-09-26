@@ -31,3 +31,35 @@ def get_ward_leaderboard() -> List[Dict[str, Any]]:
         {"rank": 4, "name": "Amit Patil", "ward": "Ward 45", "karma": 4100, "reports": 19, "badge": "🏅 Civic Veteran"},
         {"rank": 5, "name": "Sneha Deshmukh", "ward": "Ward 18", "karma": 3750, "reports": 16, "badge": "🌱 Active Citizen"}
     ]
+
+def calculate_karma_award(action_type: str, has_exif_telemetry: bool = False, is_ground_verified: bool = False) -> Dict[str, Any]:
+    """
+    Calculates dynamic karma point awards based on citizen contribution quality.
+    - Base report submission: +50 pts
+    - High-quality EXIF GPS photo telemetry bonus: +25 pts
+    - Ground repair verification bonus: +30 pts
+    - Participatory governance vote: +15 pts
+    """
+    base_points = 50
+    if action_type == "VERIFY_REPAIR":
+        base_points = 30
+    elif action_type == "GOVERNANCE_VOTE":
+        base_points = 15
+
+    bonus = 0
+    reasons = []
+    if has_exif_telemetry:
+        bonus += 25
+        reasons.append("High-quality EXIF GPS telemetry verified (+25 pts)")
+    if is_ground_verified:
+        bonus += 30
+        reasons.append("Ground repair verification completed (+30 pts)")
+
+    total = base_points + bonus
+    return {
+        "action_type": action_type,
+        "base_points": base_points,
+        "bonus_points": bonus,
+        "total_karma_awarded": total,
+        "bonus_reasons": reasons
+    }

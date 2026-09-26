@@ -80,3 +80,15 @@ def send_notification(
 
 def get_user_notifications(recipient_key: str) -> List[Dict[str, Any]]:
   return NOTIFICATION_STORE.get(recipient_key, [])
+
+def format_multichannel_templates(event_type: str, tracking_num: str, status_str: str) -> Dict[str, str]:
+    """
+    Formats structured message templates across SMS, Email, Push, and WhatsApp channels.
+    """
+    return {
+        "sms": f"CivicLens Alert: Ticket {tracking_num} status updated to {status_str}. Track live at https://civiclens.org/track/{tracking_num}",
+        "whatsapp": f"📌 *CivicLens Update*\n\nYour grievance *{tracking_num}* is now *{status_str}*.\n\nReply 'STATUS' for live updates.",
+        "push": f"Ticket {tracking_num} is now {status_str}",
+        "email_subject": f"CivicLens Municipal Update: {tracking_num} — {status_str}",
+        "email_body": f"Dear Citizen,\n\nYour reported civic grievance ({tracking_num}) has transitioned to '{status_str}'.\n\nThank you for making our city safer."
+    }

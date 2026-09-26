@@ -29,14 +29,15 @@ def get_complaint_lat_lng_cat(c: Any):
     return lat, lng, cat, ward
 
 def derive_cluster_priority(cluster_members: List[Any]) -> PriorityLevel:
-    """Dynamically infer cluster priority from member complaints (P1 > P2 > P3 > P4)."""
+    """Dynamically infer cluster priority from member complaints (P1 > P2 > P3 > P4) with multi-report escalation."""
     priorities = []
     for m in cluster_members:
         p = getattr(m, "priority", None) if hasattr(m, "priority") else (m.get("priority") if isinstance(m, dict) else None)
         p_str = p.value if hasattr(p, "value") else str(p or "")
         priorities.append(p_str)
 
-    if any("P1" in p or "Critical" in p for p in priorities):
+    # Multi-report escalation: 3+ reports in same cluster automatically escalate to P1 Critical
+    if len(cluster_members) >= 3 or any("P1" in p or "Critical" in p for p in priorities):
         return PriorityLevel.P1
     elif any("P2" in p or "High" in p for p in priorities):
         return PriorityLevel.P2

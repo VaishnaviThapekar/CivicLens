@@ -32,8 +32,8 @@
       "submitted_by": "Citizen",
       "submitted_by_user_id": null,
       "submitted_by_email": null,
-      "created_at": "2026-09-26T14:38:38.840790",
-      "updated_at": "2026-09-26T14:38:38.840797",
+      "created_at": "2026-09-26T14:48:51.649130",
+      "updated_at": "2026-09-26T14:48:51.649141",
       "officer_assigned": null,
       "team_assigned": null,
       "resolution_evidence_image_url": null,
@@ -41,9 +41,9 @@
       "verification_result": null,
       "status_history": []
     },
-    "c-a89ed4": {
-      "id": "c-a89ed4",
-      "tracking_number": "CL-NK-2026-BE83A7",
+    "c-ccc3ff": {
+      "id": "c-ccc3ff",
+      "tracking_number": "CL-NK-2026-04FEE1",
       "title": "Road crater near main gate",
       "description": "Deep pothole defect",
       "media_type": "image",
@@ -93,8 +93,8 @@
       "submitted_by": "citizen@civiclens.org",
       "submitted_by_user_id": "usr-citizen-001",
       "submitted_by_email": "citizen@civiclens.org",
-      "created_at": "2026-09-26T14:38:38.856331",
-      "updated_at": "2026-09-26T14:38:38.856335",
+      "created_at": "2026-09-26T14:48:51.677780",
+      "updated_at": "2026-09-26T14:48:51.677786",
       "officer_assigned": null,
       "team_assigned": null,
       "resolution_evidence_image_url": null,
@@ -103,7 +103,7 @@
       "status_history": [
         {
           "status": "Submitted",
-          "timestamp": "2026-09-26T14:38:38.856338",
+          "timestamp": "2026-09-26T14:48:51.677789",
           "actor": "Citizen (citizen@civiclens.org)",
           "notes": "Multimodal issue report submitted"
         }

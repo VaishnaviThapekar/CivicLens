@@ -1,23 +1,40 @@
 import os
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, APIRouter, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from datetime import datetime
 from typing import Optional
-from fastapi.staticfiles import StaticFiles
 
-from app.routes import complaints, verification, officer, intelligence, supervisor, auth
+from app.routes import complaints, verification, officer, intelligence, supervisor, auth, docs_export
 from app.routes.auth import require_role, get_current_user_email
 from app.services.pdf_export import generate_audit_report
 from app.services.websocket_manager import manager
 from app.db.store import db_store
+from app.db.session import init_db
+from app.middleware.security_health import (
+    SecurityHeadersMiddleware,
+    RateLimitMiddleware,
+    get_system_metrics_data,
+    generate_prometheus_metrics
+)
+
+# Initialize database schema on startup
+try:
+    init_db()
+except Exception as e:
+    print(f"Database initialization warning: {e}")
 
 app = FastAPI(
     title="CivicLens — AI-Powered Civic Intelligence API",
     description="Multimodal Civic Grievance Processing, Geospatial Incident Clustering, and AI Resolution Verification Engine.",
-    version="1.3.0"
+    version="1.4.0"
 )
 
-# Bug 25 Fix: Secure CORS middleware configuration for production & local clients
+# Mount Security Headers & Rate Limiting Middlewares
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RateLimitMiddleware)
+
+# Secure CORS middleware configuration for production & local clients
 custom_origins = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
 ALLOWED_ORIGINS = list(set([
     "http://localhost:3000",
@@ -41,8 +58,9 @@ app.include_router(verification.router)
 app.include_router(officer.router)
 app.include_router(intelligence.router)
 app.include_router(supervisor.router)
+app.include_router(docs_export.router)
 
-# Bug 44 Fix: API v1 Versioning Prefix Alias (/api/v1)
+# API v1 Versioning Prefix Alias (/api/v1)
 v1_router = APIRouter(prefix="/api/v1")
 v1_router.include_router(auth.router)
 v1_router.include_router(complaints.router)
@@ -50,6 +68,7 @@ v1_router.include_router(verification.router)
 v1_router.include_router(officer.router)
 v1_router.include_router(intelligence.router)
 v1_router.include_router(supervisor.router)
+v1_router.include_router(docs_export.router)
 app.include_router(v1_router)
 
 @app.websocket("/ws")
@@ -95,11 +114,14 @@ def get_complaint_audit_dossier(
 @app.get("/api/health")
 @app.get("/api/v1/health")
 def health_check():
-    return {
-        "status": "healthy",
-        "service": "CivicLens AI Platform Engine",
-        "timestamp": datetime.now().isoformat()
-    }
+    return get_system_metrics_data(db_store)
+
+@app.get("/metrics")
+@app.get("/api/metrics")
+@app.get("/api/v1/metrics")
+def metrics_exporter():
+    content = generate_prometheus_metrics(db_store)
+    return PlainTextResponse(content=content, media_type="text/plain; version=0.0.4")
 
 @app.get("/")
 def root_status():
@@ -108,13 +130,15 @@ def root_status():
         "system": "CivicLens AI Engine",
         "api_versions": ["/api", "/api/v1"],
         "features": [
-            "Multimodal NLP Intent Extraction",
+            "Multimodal NLP Intent Extraction & Sentiment Urgency",
             "Computer Vision Infrastructure Defect Detection",
             "Geospatial Incident Clustering (DBSCAN / Haversine)",
             "AI Resolution Verification & Anti-Fraud Evidence Matching",
             "Predictive Civic Risk Forecasting",
             "WebSocket Real-Time Live Status Broadcaster",
             "Supervisor Audit & Contractor SLA Escalation",
-            "CPGRAMS Dossier Export Engine"
+            "CPGRAMS Dossier Export Engine",
+            "Prometheus Metrics & Health Exporter",
+            "OpenAPI 3.0 & Postman Collection Exporter"
         ]
     }
